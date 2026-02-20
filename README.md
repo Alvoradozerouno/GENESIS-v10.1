@@ -1,4 +1,5 @@
 <p align="center">
+  <img src="assets/genesis_logo.png" alt="GENESIS v10.1" width="280"><br><br>
   <strong>GENESIS v10.1</strong><br>
   <em>Autonomous Sovereign Intelligence OS</em>
 </p>
