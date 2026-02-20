@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GENESIS v10.1 — Sovereign Control Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js" defer></script>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen">
+
+<nav class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <div class="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></div>
+    <h1 class="text-xl font-bold text-white tracking-tight">GENESIS <span class="text-indigo-400">v10.1</span></h1>
+    <span class="text-xs text-slate-500 ml-2">Sovereign Intelligence OS</span>
+  </div>
+  <div class="flex items-center gap-4 text-sm">
+    <span class="text-emerald-400">FIPS: ON</span>
+    <span class="text-emerald-400">HSM: ON</span>
+    <span class="text-indigo-400">eIDAS 2.0</span>
+    <span class="text-slate-500" id="clock"></span>
+  </div>
+</nav>
+
+<div class="max-w-7xl mx-auto p-6" x-data="{ activeTab: 'overview' }">
+
+  <div class="flex gap-2 mb-6 flex-wrap">
+    <template x-for="tab in ['overview','tenants','compliance','risk','federation','audit','esg','backup']">
+      <button
+        @click="activeTab = tab"
+        :class="activeTab === tab ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'"
+        class="px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize"
+        x-text="tab">
+      </button>
+    </template>
+  </div>
+
+  <div x-show="activeTab === 'overview'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">System Status</div>
+      <div class="text-2xl font-bold text-emerald-400">OPERATIONAL</div>
+      <div class="text-sm text-slate-500 mt-1">11 namespaces active</div>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">Risk Level</div>
+      <div class="text-2xl font-bold text-amber-400" hx-get="/api/risk" hx-trigger="every 30s">MONITORING</div>
+      <div class="text-sm text-slate-500 mt-1">ML engine active</div>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">Compliance</div>
+      <div class="text-2xl font-bold text-indigo-400">eIDAS 2.0</div>
+      <div class="text-sm text-slate-500 mt-1">QES ready, XBRL validated</div>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">Federation</div>
+      <div class="text-2xl font-bold text-purple-400">PAN-EU</div>
+      <div class="text-sm text-slate-500 mt-1">Treaty engine active</div>
+    </div>
+
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 col-span-full">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-3">Security Stack</div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+        <div class="flex items-center gap-2"><div class="w-2 h-2 bg-emerald-500 rounded-full"></div> SPIRE (Zero Trust)</div>
+        <div class="flex items-center gap-2"><div class="w-2 h-2 bg-emerald-500 rounded-full"></div> Falco (Runtime)</div>
+        <div class="flex items-center gap-2"><div class="w-2 h-2 bg-emerald-500 rounded-full"></div> External Secrets</div>
+        <div class="flex items-center gap-2"><div class="w-2 h-2 bg-emerald-500 rounded-full"></div> Cert-Manager</div>
+        <div class="flex items-center gap-2"><div class="w-2 h-2 bg-emerald-500 rounded-full"></div> Network Policies</div>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'tenants'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-lg font-semibold mb-4">Tenant Management</h2>
+    <div class="text-slate-400 text-sm">
+      <p>Tenants are managed via Kubernetes CRD. Create tenants with:</p>
+      <pre class="bg-slate-950 rounded-lg p-4 mt-3 text-indigo-300 text-xs overflow-x-auto">kubectl apply -f - &lt;&lt;EOF
+apiVersion: genesis.ai/v1
+kind: Tenant
+metadata:
+  name: acme-bank
+spec:
+  displayName: "ACME Bank AG"
+  quota: enterprise
+  isolation: network
+  oidcGroup: acme-admins
+  esgEnabled: true
+  complianceFrameworks:
+    - eIDAS
+    - GDPR
+    - PSD2
+    - Basel-III
+EOF</pre>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'compliance'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-lg font-semibold mb-4">Compliance Frameworks</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="bg-slate-950 rounded-lg p-4">
+        <div class="text-indigo-400 font-semibold">eIDAS 2.0</div>
+        <div class="text-xs text-slate-500 mt-1">Qualified Electronic Signatures via QTSP (Swisscom, Entrust, D-Trust). EUDI Wallet ready.</div>
+        <div class="text-emerald-400 text-xs mt-2">STATUS: COMPLIANT</div>
+      </div>
+      <div class="bg-slate-950 rounded-lg p-4">
+        <div class="text-indigo-400 font-semibold">GDPR</div>
+        <div class="text-xs text-slate-500 mt-1">Data sovereignty enforcement, tenant-level isolation, right-to-erasure automation.</div>
+        <div class="text-emerald-400 text-xs mt-2">STATUS: COMPLIANT</div>
+      </div>
+      <div class="bg-slate-950 rounded-lg p-4">
+        <div class="text-indigo-400 font-semibold">PSD2 / Basel III</div>
+        <div class="text-xs text-slate-500 mt-1">Transaction monitoring, risk scoring, regulatory reporting via XBRL.</div>
+        <div class="text-emerald-400 text-xs mt-2">STATUS: COMPLIANT</div>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'risk'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-lg font-semibold mb-4">Predictive Risk Engine</h2>
+    <div class="text-slate-400 text-sm">
+      <p>GradientBoosting ML model analyzing 5 dimensions: CPU, Memory, Network I/O, Disk Usage, Error Rate.</p>
+      <p class="mt-2">Run prediction: <code class="bg-slate-950 px-2 py-1 rounded text-indigo-300">python3 ai/risk_ml.py 75 65 50 60 12</code></p>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'federation'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-lg font-semibold mb-4">Pan-EU Federation Engine</h2>
+    <div class="text-slate-400 text-sm">
+      <p>Cross-jurisdictional treaty management with SPIFFE+QES trust anchoring and AI-assisted dispute arbitration.</p>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'audit'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-lg font-semibold mb-4">Audit Evidence Vault</h2>
+    <div class="text-slate-400 text-sm">
+      <p>All evidence packages are SHA256-hashed, Cosign-signed, and stored with full provenance chain.</p>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'esg'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-lg font-semibold mb-4">ESG Reporting</h2>
+    <div class="text-slate-400 text-sm">
+      <p>Per-tenant ESG scoring with automated CSRD/SFDR reporting capability.</p>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'backup'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+    <h2 class="text-lg font-semibold mb-4">Backup & Disaster Recovery</h2>
+    <div class="text-slate-400 text-sm">
+      <p>Velero-based backup every 6 hours with automated weekly restore testing.</p>
+    </div>
+  </div>
+
+</div>
+
+<footer class="border-t border-slate-800 mt-12 py-6 text-center text-xs text-slate-600">
+  GENESIS v10.1 — Autonomous Sovereign Intelligence OS<br>
+  ORION | Gerhard Hirschmann | Elisabeth Steurer<br>
+  Apache 2.0 License
+</footer>
+
+<script>
+  setInterval(() => {
+    document.getElementById('clock').textContent = new Date().toISOString().replace('T',' ').slice(0,19) + ' UTC';
+  }, 1000);
+</script>
+
+</body>
+</html>
