@@ -36,3 +36,43 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# GENESIS-specific
+genesis-deploy/
+evidence/*/
+evidence/**/*.tar.gz
+evidence/**/*.json
+evidence/**/*.yaml
+evidence/**/*.txt
+!evidence/README.md
+!evidence/.gitkeep
+*.sig.txt
+hash.txt
+risk_score.txt
+audit-package.tar.gz
+
+# Kubernetes generated files
+kubeconfig
+*.kubeconfig
+.kube/
+
+# Go Operator build artifacts
+operator/bin/
+operator/testbin/
+operator/cover.out
+
+# Backup artifacts
+backup/**/*.backup
+backup/**/*.tar.gz
+
+# Sensitive configurations
+*_token.txt
+*.pem
+*.key
+!*.pub
+keycloak-admin-password.txt
+vault-keys.txt
+
+# Temporary deployment files
+/workdir/
+/tmp/

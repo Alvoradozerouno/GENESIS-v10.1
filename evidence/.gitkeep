@@ -1,0 +1,2 @@
+# This file ensures the evidence directory is tracked by Git
+# Actual evidence packages generated during deployment
