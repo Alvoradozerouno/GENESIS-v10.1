@@ -49,6 +49,18 @@ evidence/**/*.txt
 *.sig.txt
 hash.txt
 
+# Marketing automation scripts (contain API tokens - NEVER commit!)
+product-hunt-setup.ps1
+product-hunt-test.ps1
+product-hunt-devtoken-test.ps1
+huggingface-setup.ps1
+huggingface-upload.py
+reddit-setup.ps1
+reddit-automation.py
+*-setup-local.ps1
+*.pyc
+__pycache__/
+
 # SECURITY: NEVER commit tokens or secrets
 setup-github-secret-LOCAL.ps1
 *-LOCAL.ps1
