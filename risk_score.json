@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-02-27T07:38:05.658665+00:00",
+  "version": "10.1.0",
+  "engine": "GradientBoostingRegressor",
+  "input_metrics": {
+    "cpu": 75.0,
+    "memory": 65.0,
+    "network_io": 50.0,
+    "disk_usage": 60.0,
+    "error_rate": 12.0
+  },
+  "risk_score": 52.0,
+  "risk_level": "MEDIUM",
+  "confidence": {
+    "cv_r2_mean": -3.674,
+    "cv_r2_std": 2.7204
+  },
+  "feature_importance": {
+    "cpu": 0.0878,
+    "memory": 0.1247,
+    "network_io": 0.0555,
+    "disk_usage": 0.4856,
+    "error_rate": 0.2463
+  },
+  "model_params": {
+    "n_estimators": 100,
+    "max_depth": 4,
+    "training_samples": 15
+  },
+  "recommendation": "Monitor closely"
+}

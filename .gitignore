@@ -48,6 +48,13 @@ evidence/**/*.txt
 !evidence/.gitkeep
 *.sig.txt
 hash.txt
+
+# SECURITY: NEVER commit tokens or secrets
+setup-github-secret-LOCAL.ps1
+*-LOCAL.ps1
+*.token
+*.secret
+*.pat
 risk_score.txt
 audit-package.tar.gz
 
