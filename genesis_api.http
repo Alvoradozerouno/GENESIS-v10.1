@@ -1,0 +1,157 @@
+### GENESIS v10.1 - API Test File
+### Use with VS Code REST Client extension (Ctrl+Click "Send Request")
+
+@baseUrl = http://localhost:8080
+
+### ──────────────────────────────────────────────────────────
+### 1. System Info
+### ──────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/
+Accept: application/json
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 2. Health Check
+### ──────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/health
+Accept: application/json
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 3. Risk Score - CRITICAL scenario
+### ──────────────────────────────────────────────────────────
+
+POST {{baseUrl}}/api/risk/score
+Content-Type: application/json
+
+{
+  "cpu": 95,
+  "memory": 90,
+  "network_io": 85,
+  "disk_usage": 88,
+  "error_rate": 65,
+  "tenant_id": "bank_deutsche_001",
+  "framework": "basel_iii"
+}
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 4. Risk Score - LOW/MINIMAL scenario
+### ──────────────────────────────────────────────────────────
+
+POST {{baseUrl}}/api/risk/score
+Content-Type: application/json
+
+{
+  "cpu": 20,
+  "memory": 15,
+  "network_io": 10,
+  "disk_usage": 25,
+  "error_rate": 0.5,
+  "tenant_id": "bank_raiffeisen_at",
+  "framework": "eba"
+}
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 5. GDPR Compliance Check
+### ──────────────────────────────────────────────────────────
+
+POST {{baseUrl}}/api/compliance/gdpr
+Content-Type: application/json
+
+{
+  "tenant_id": "bank_sparkasse_de",
+  "data_residency": "DE",
+  "encryption_at_rest": true,
+  "encryption_in_transit": true,
+  "audit_logging": true,
+  "data_retention_days": 3650,
+  "mfa_enabled": true
+}
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 6. DORA Compliance Check (partially non-compliant)
+### ──────────────────────────────────────────────────────────
+
+POST {{baseUrl}}/api/compliance/dora
+Content-Type: application/json
+
+{
+  "tenant_id": "fintech_startup_at",
+  "data_residency": "AT",
+  "encryption_at_rest": true,
+  "encryption_in_transit": false,
+  "audit_logging": true,
+  "data_retention_days": 365,
+  "mfa_enabled": false
+}
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 7. List all EU Frameworks
+### ──────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/compliance/frameworks/all
+Accept: application/json
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 8. QES Document Signing (Swisscom)
+### ──────────────────────────────────────────────────────────
+
+POST {{baseUrl}}/api/cert/sign
+Content-Type: application/json
+
+{
+  "document_name": "Q1_2026_Basel_III_Report.pdf",
+  "signer": "chief-risk-officer@bank.eu",
+  "provider": "swisscom",
+  "framework": "eidas_2"
+}
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 9. QES Document Signing (D-Trust / Bundesdruckerei)
+### ──────────────────────────────────────────────────────────
+
+POST {{baseUrl}}/api/cert/sign
+Content-Type: application/json
+
+{
+  "document_name": "GDPR_DPA_Agreement_2026.pdf",
+  "signer": "dpo@sparkasse.de",
+  "provider": "dtrust",
+  "framework": "eidas_2"
+}
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 10. Market Valuation Summary
+### ──────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/valuation
+Accept: application/json
+
+###
+
+### ──────────────────────────────────────────────────────────
+### 11. Audit Trail
+### ──────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/audit?limit=20
+Accept: application/json
+
+###

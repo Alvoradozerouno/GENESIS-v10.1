@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GENESIS v10.1 — Sovereign Control Center</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 </head>
 <body class="bg-slate-950 text-slate-200 min-h-screen">
 
@@ -27,7 +27,7 @@
 <div class="max-w-7xl mx-auto p-6" x-data="{ activeTab: 'overview' }">
 
   <div class="flex gap-2 mb-6 flex-wrap">
-    <template x-for="tab in ['overview','tenants','compliance','risk','federation','audit','esg','backup']">
+    <template x-for="tab in ['overview','matrix','tenants','compliance','risk','federation','audit','esg','backup']">
       <button
         @click="activeTab = tab"
         :class="activeTab === tab ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'"
@@ -38,25 +38,26 @@
   </div>
 
   <div x-show="activeTab === 'overview'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">System Status</div>
-      <div class="text-2xl font-bold text-emerald-400">OPERATIONAL</div>
-      <div class="text-sm text-slate-500 mt-1">11 namespaces active</div>
+    <!-- Live API cards -->
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5" x-data="liveHealth()" x-init="init()">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">API Status</div>
+      <div class="text-2xl font-bold" :class="status==='healthy' ? 'text-emerald-400' : 'text-red-400'" x-text="status.toUpperCase()">…</div>
+      <div class="text-sm text-slate-500 mt-1" x-text="'R\u00b2=' + r2 + ' · ' + fwCount + ' frameworks'">loading…</div>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">Risk Level</div>
-      <div class="text-2xl font-bold text-amber-400" hx-get="/api/risk" hx-trigger="every 30s">MONITORING</div>
-      <div class="text-sm text-slate-500 mt-1">ML engine active</div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5" x-data="liveRisk()" x-init="init()">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">Basel III Risk</div>
+      <div class="text-2xl font-bold" :class="{'text-emerald-400':level==='LOW'||level==='MINIMAL','text-amber-400':level==='MEDIUM','text-orange-400':level==='HIGH','text-red-500':level==='CRITICAL'}" x-text="score + ' / 100'">…</div>
+      <div class="text-sm text-slate-500 mt-1" x-text="level">loading…</div>
     </div>
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
       <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">Compliance</div>
       <div class="text-2xl font-bold text-indigo-400">eIDAS 2.0</div>
-      <div class="text-sm text-slate-500 mt-1">QES ready, XBRL validated</div>
+      <div class="text-sm text-slate-500 mt-1">QES · XBRL · EUDI Wallet</div>
     </div>
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">Federation</div>
-      <div class="text-2xl font-bold text-purple-400">PAN-EU</div>
-      <div class="text-sm text-slate-500 mt-1">Treaty engine active</div>
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-1">Valuation</div>
+      <div class="text-2xl font-bold text-purple-400">€345M</div>
+      <div class="text-sm text-slate-500 mt-1">Median · 4 methods · Apache 2.0</div>
     </div>
 
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 col-span-full">
@@ -95,32 +96,134 @@ EOF</pre>
     </div>
   </div>
 
-  <div x-show="activeTab === 'compliance'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-    <h2 class="text-lg font-semibold mb-4">Compliance Frameworks</h2>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div class="bg-slate-950 rounded-lg p-4">
-        <div class="text-indigo-400 font-semibold">eIDAS 2.0</div>
-        <div class="text-xs text-slate-500 mt-1">Qualified Electronic Signatures via QTSP (Swisscom, Entrust, D-Trust). EUDI Wallet ready.</div>
-        <div class="text-emerald-400 text-xs mt-2">STATUS: COMPLIANT</div>
+  <div x-show="activeTab === 'compliance'" class="bg-slate-900 border border-slate-800 rounded-xl p-6" x-data="liveCompliance()" x-init="init()">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold">Compliance Status — 9 EU Frameworks</h2>
+      <button @click="init()" class="px-3 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors">↺ Refresh</button>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <template x-for="fw in frameworks" :key="fw">
+        <div class="bg-slate-950 rounded-lg p-4 border" :class="statusBorder(getStatus(fw))">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-semibold text-sm text-indigo-300" x-text="fw.replace('_','-').toUpperCase()"></div>
+            <div class="text-xs font-bold px-2 py-0.5 rounded-full"
+              :class="getStatus(fw)==='COMPLIANT' ? 'bg-emerald-900 text-emerald-300' : getStatus(fw)==='PARTIALLY_COMPLIANT' ? 'bg-amber-900 text-amber-300' : 'bg-red-900 text-red-300'"
+              x-text="getStatus(fw)==='PARTIALLY_COMPLIANT' ? 'PARTIAL' : getStatus(fw) || '…'"></div>
+          </div>
+          <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden mb-2">
+            <div class="h-full rounded-full transition-all duration-700"
+              :class="getScore(fw) >= 100 ? 'bg-emerald-500' : getScore(fw) >= 70 ? 'bg-amber-500' : 'bg-red-500'"
+              :style="'width:' + (getScore(fw)||0) + '%'"></div>
+          </div>
+          <div class="text-xs text-slate-500">
+            <span x-text="getScore(fw) + '%'"></span> passed
+            <template x-if="getGaps(fw).length > 0">
+              <span class="ml-2 text-amber-400" x-text="'⚠ ' + getGaps(fw).join(', ')"></span>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ── EU RISK MATRIX TAB ── -->
+  <div x-show="activeTab === 'matrix'" x-data="euMatrix()" x-init="init()" class="space-y-4">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold">EU Risk Matrix — 9 Frameworks Live</h2>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-500" x-text="'Last update: ' + lastUpdate"></span>
+        <button @click="refresh()" class="px-3 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors">↺ Refresh</button>
       </div>
-      <div class="bg-slate-950 rounded-lg p-4">
-        <div class="text-indigo-400 font-semibold">GDPR</div>
-        <div class="text-xs text-slate-500 mt-1">Data sovereignty enforcement, tenant-level isolation, right-to-erasure automation.</div>
-        <div class="text-emerald-400 text-xs mt-2">STATUS: COMPLIANT</div>
+    </div>
+    <!-- System metric sliders -->
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-3">System Metrics (drag to simulate)</div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+        <template x-for="(val, key) in metrics">
+          <div>
+            <div class="flex justify-between mb-1">
+              <span class="text-slate-400 capitalize" x-text="key.replace('_',' ')"></span>
+              <span class="font-mono text-indigo-300" x-text="metrics[key] + '%'"></span>
+            </div>
+            <input type="range" min="0" max="100" step="1"
+              :value="metrics[key]"
+              @input="metrics[key] = +$event.target.value; debouncedRefresh()"
+              class="w-full accent-indigo-500">
+          </div>
+        </template>
       </div>
-      <div class="bg-slate-950 rounded-lg p-4">
-        <div class="text-indigo-400 font-semibold">PSD2 / Basel III</div>
-        <div class="text-xs text-slate-500 mt-1">Transaction monitoring, risk scoring, regulatory reporting via XBRL.</div>
-        <div class="text-emerald-400 text-xs mt-2">STATUS: COMPLIANT</div>
+    </div>
+    <!-- Bar chart -->
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      <canvas id="riskBarChart" height="90"></canvas>
+    </div>
+    <!-- Radar chart + table -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        <canvas id="riskRadarChart" height="260"></canvas>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 overflow-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-slate-500 text-xs uppercase border-b border-slate-800">
+            <th class="text-left py-2">Framework</th>
+            <th class="text-right py-2">Score</th>
+            <th class="text-right py-2">Level</th>
+            <th class="text-right py-2">Top Driver</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="row in rows" :key="row.fw">
+              <tr class="border-b border-slate-800/50 hover:bg-slate-800/30">
+                <td class="py-2 font-mono text-xs text-indigo-300" x-text="row.fw.toUpperCase().replace('_','-')"></td>
+                <td class="py-2 text-right font-bold" :class="riskColor(row.score)" x-text="row.score"></td>
+                <td class="py-2 text-right text-xs" :class="riskColor(row.score)" x-text="row.level"></td>
+                <td class="py-2 text-right text-xs text-slate-400" x-text="row.driver"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
 
-  <div x-show="activeTab === 'risk'" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-    <h2 class="text-lg font-semibold mb-4">Predictive Risk Engine</h2>
-    <div class="text-slate-400 text-sm">
-      <p>GradientBoosting ML model analyzing 5 dimensions: CPU, Memory, Network I/O, Disk Usage, Error Rate.</p>
-      <p class="mt-2">Run prediction: <code class="bg-slate-950 px-2 py-1 rounded text-indigo-300">python3 ai/risk_ml.py 75 65 50 60 12</code></p>
+  <!-- ── RISK TAB (single framework deep-dive) ── -->
+  <div x-show="activeTab === 'risk'" class="bg-slate-900 border border-slate-800 rounded-xl p-6" x-data="singleRisk()" x-init="init()">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold">Risk Deep-Dive</h2>
+      <select x-model="framework" @change="fetch()" class="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-1.5">
+        <template x-for="fw in frameworks"><option :value="fw" x-text="fw.replace('_','-').toUpperCase()"></option></template>
+      </select>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="bg-slate-950 rounded-lg p-4">
+        <div class="text-slate-500 text-xs mb-1">Risk Score</div>
+        <div class="text-3xl font-bold" :class="riskColor(result.risk_score)" x-text="result.risk_score || '—'"></div>
+      </div>
+      <div class="bg-slate-950 rounded-lg p-4">
+        <div class="text-slate-500 text-xs mb-1">Level</div>
+        <div class="text-xl font-bold" :class="riskColor(result.risk_score)" x-text="result.risk_level || '—'"></div>
+      </div>
+      <div class="bg-slate-950 rounded-lg p-4">
+        <div class="text-slate-500 text-xs mb-1">Model R²</div>
+        <div class="text-xl font-bold text-indigo-400" x-text="result.model_confidence_r2 || '—'"></div>
+      </div>
+      <div class="bg-slate-950 rounded-lg p-4 col-span-1">
+        <div class="text-slate-500 text-xs mb-1">Regulatory Action</div>
+        <div class="text-xs text-amber-300 mt-1" x-text="result.regulatory_action || '—'"></div>
+      </div>
+    </div>
+    <div class="bg-slate-950 rounded-lg p-4">
+      <div class="text-slate-500 text-xs uppercase tracking-wider mb-3">Feature Importance (framework weights)</div>
+      <div class="space-y-2">
+        <template x-for="(val, key) in result.feature_importance">
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400 w-24" x-text="key"></span>
+            <div class="flex-1 bg-slate-800 rounded-full h-2">
+              <div class="h-2 rounded-full bg-indigo-500" :style="'width:' + (val*100/0.40*100) + '%'"></div>
+            </div>
+            <span class="text-xs font-mono text-slate-300 w-10 text-right" x-text="(val*100).toFixed(0)+'%'"></span>
+          </div>
+        </template>
+      </div>
     </div>
   </div>
 
@@ -161,9 +264,232 @@ EOF</pre>
 </footer>
 
 <script>
-  setInterval(() => {
-    document.getElementById('clock').textContent = new Date().toISOString().replace('T',' ').slice(0,19) + ' UTC';
-  }, 1000);
+const API = 'http://localhost:8080';
+const FRAMEWORKS = ['basel_iii','dora','gdpr','ai_act','mifid_ii','aml6','psd2','solvency_ii','eba'];
+const FW_LABELS = {
+  basel_iii:'Basel III', dora:'DORA', gdpr:'GDPR', ai_act:'AI Act',
+  mifid_ii:'MiFID II', aml6:'AML 6', psd2:'PSD2', solvency_ii:'Solvency II', eba:'EBA'
+};
+const BASE_COMPLIANCE = {
+  data_residency:'AT', encryption_at_rest:true, encryption_in_transit:true,
+  audit_logging:true, data_retention_days:3650, mfa_enabled:true,
+  ict_incident_reporting:true, third_party_risk_assessed:true, penetration_testing_done:false,
+  consent_management:true, data_minimization:true, breach_notification_proc:true,
+  ai_risk_classification:true, explainability_docs:true, conformity_assessment:false,
+  kyc_cdd_process:true, transaction_monitoring:true, str_filing_process:true,
+  sca_implemented:true, xs2a_api_available:false, best_execution_policy:true,
+  transaction_reporting:true, scr_coverage_pct:120, orsa_reporting:true,
+  cet1_ratio_pct:12.5, lcr_ratio_pct:115
+};
+
+function riskColor(score) {
+  if (score < 20) return 'text-emerald-400';
+  if (score < 40) return 'text-emerald-400';
+  if (score < 60) return 'text-amber-400';
+  if (score < 80) return 'text-orange-400';
+  return 'text-red-500';
+}
+function riskBg(score) {
+  if (score < 40) return '#10b981';
+  if (score < 60) return '#f59e0b';
+  if (score < 80) return '#f97316';
+  return '#ef4444';
+}
+function levelBadge(level) {
+  const map = { LOW:'bg-emerald-900 text-emerald-300', MEDIUM:'bg-amber-900 text-amber-300',
+    HIGH:'bg-orange-900 text-orange-300', CRITICAL:'bg-red-900 text-red-300' };
+  return map[level] || 'bg-slate-700 text-slate-300';
+}
+
+function liveHealth() {
+  return {
+    status: 'Connecting…', r2: '—', fwCount: 0, uptime: '—', error: null,
+    async init() {
+      try {
+        const r = await fetch(`${API}/api/health`);
+        const d = await r.json();
+        this.status = d.status || 'OK';
+        this.r2 = d.model_r2 !== undefined ? d.model_r2.toFixed(4) : '—';
+        this.fwCount = d.frameworks_loaded || 9;
+        this.uptime = d.uptime_seconds ? `${Math.floor(d.uptime_seconds/60)}m` : '—';
+      } catch(e) { this.status = 'Offline'; this.error = e.message; }
+    }
+  };
+}
+
+function liveRisk() {
+  return {
+    score: '—', level: '—', levelClass: 'text-slate-400', loading: false,
+    async init() {
+      this.loading = true;
+      try {
+        const perf = (await (await fetch(`${API}/api/system/metrics`)).json()) || {};
+        const body = {
+          cpu_usage_pct: perf.cpu_usage_pct ?? 67,
+          memory_usage_pct: perf.memory_usage_pct ?? 75.1,
+          network_io_mbps: perf.network_io_mbps ?? 2,
+          disk_usage_pct: perf.disk_usage_pct ?? 84.9,
+          error_rate_pct: perf.error_rate_pct ?? 0,
+          framework: 'dora'
+        };
+        const r = await (await fetch(`${API}/api/risk/score`, {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+        })).json();
+        this.score = r.risk_score?.toFixed(1) ?? '—';
+        this.level = r.risk_level ?? '—';
+        this.levelClass = riskColor(r.risk_score ?? 0);
+      } catch(e) { this.score = 'ERR'; this.level = 'N/A'; }
+      this.loading = false;
+    }
+  };
+}
+
+function euMatrix() {
+  return {
+    metrics: { cpu: 67, memory: 75.1, network_io: 2, disk_usage: 84.9, error_rate: 0 },
+    rows: [], loading: false, barChart: null, radarChart: null, _timer: null,
+    async init() {
+      await this.refresh();
+    },
+    debouncedRefresh() {
+      clearTimeout(this._timer);
+      this._timer = setTimeout(() => this.refresh(), 400);
+    },
+    async refresh() {
+      this.loading = true;
+      const results = await Promise.all(FRAMEWORKS.map(async fw => {
+        try {
+          const rBody = { cpu_usage_pct: this.metrics.cpu, memory_usage_pct: this.metrics.memory,
+            network_io_mbps: this.metrics.network_io, disk_usage_pct: this.metrics.disk_usage,
+            error_rate_pct: this.metrics.error_rate, framework: fw };
+          const [rRes, cRes] = await Promise.all([
+            fetch(`${API}/api/risk/score`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(rBody) }).then(r=>r.json()),
+            fetch(`${API}/api/compliance/${fw}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...BASE_COMPLIANCE, framework:fw}) }).then(r=>r.json()).catch(()=>({}))
+          ]);
+          return { fw, label: FW_LABELS[fw], score: rRes.risk_score ?? 0,
+            level: rRes.risk_level ?? '—', action: rRes.regulatory_action ?? '—',
+            compliance: cRes.compliance_status ?? '—', pct: cRes.compliance_score_pct ?? 0 };
+        } catch(e) { return { fw, label: FW_LABELS[fw], score: 0, level:'ERR', action:'—', compliance:'ERR', pct:0 }; }
+      }));
+      this.rows = results;
+      this.loading = false;
+      this.$nextTick(() => this._drawCharts(results));
+    },
+    _drawCharts(rows) {
+      const labels = rows.map(r => r.label);
+      const scores = rows.map(r => parseFloat(r.score.toFixed(2)));
+      const colors = rows.map(r => riskBg(r.score));
+
+      const barEl = document.getElementById('riskBarChart');
+      if (barEl) {
+        if (this.barChart) this.barChart.destroy();
+        this.barChart = new Chart(barEl, {
+          type: 'bar',
+          data: { labels, datasets: [{ label: 'Risk Score', data: scores,
+            backgroundColor: colors, borderColor: colors, borderWidth: 1, borderRadius: 4 }] },
+          options: { responsive: true, plugins: { legend:{ display:false } },
+            scales: { x:{ ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' } },
+              y:{ min:0, max:100, ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' } } } }
+        });
+      }
+
+      const radEl = document.getElementById('riskRadarChart');
+      if (radEl) {
+        if (this.radarChart) this.radarChart.destroy();
+        this.radarChart = new Chart(radEl, {
+          type: 'radar',
+          data: { labels, datasets: [{ label: 'Risk Score', data: scores,
+            backgroundColor: 'rgba(99,102,241,0.2)', borderColor: '#6366f1',
+            pointBackgroundColor: colors, pointRadius: 4, borderWidth: 2 }] },
+          options: { responsive: true,
+            plugins: { legend:{ labels:{ color:'#94a3b8' } } },
+            scales: { r: { min:0, max:100, ticks:{ color:'#94a3b8', backdropColor:'transparent' },
+              grid:{ color:'#334155' }, angleLines:{ color:'#334155' },
+              pointLabels:{ color:'#cbd5e1', font:{ size:11 } } } } }
+        });
+      }
+    }
+  };
+}
+
+function singleRisk() {
+  return {
+    framework: 'dora', result: null, loading: false, error: null,
+    metrics: { cpu: 67, memory: 75.1, network_io: 2, disk_usage: 84.9, error_rate: 0 },
+    fwOptions: FRAMEWORKS.map(f => ({ value: f, label: FW_LABELS[f] })),
+    async init() { await this.run(); },
+    async run() {
+      this.loading = true; this.error = null;
+      try {
+        const body = { cpu_usage_pct: this.metrics.cpu, memory_usage_pct: this.metrics.memory,
+          network_io_mbps: this.metrics.network_io, disk_usage_pct: this.metrics.disk_usage,
+          error_rate_pct: this.metrics.error_rate, framework: this.framework };
+        this.result = await (await fetch(`${API}/api/risk/score`, {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+        })).json();
+      } catch(e) { this.error = e.message; }
+      this.loading = false;
+    },
+    scoreClass() { return riskColor(this.result?.risk_score ?? 0); },
+    badgeClass() { return levelBadge(this.result?.risk_level); },
+    featMax() {
+      const fi = this.result?.feature_importance;
+      if (!fi) return 1;
+      return Math.max(...Object.values(fi));
+    },
+    featPct(v) { return ((v / this.featMax()) * 100).toFixed(1); }
+  };
+}
+
+function liveCompliance() {
+  return {
+    statuses: {}, scores: {}, gaps: {}, loading: false,
+    fwList: FRAMEWORKS,
+    fwLabel(fw) { return FW_LABELS[fw] || fw; },
+    async init() { await this.loadAll(); },
+    async loadAll() {
+      this.loading = true;
+      await Promise.all(FRAMEWORKS.map(async fw => {
+        try {
+          const body = { ...BASE_COMPLIANCE, framework: fw };
+          const r = await (await fetch(`${API}/api/compliance/${fw}`, {
+            method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+          })).json();
+          this.statuses[fw] = r.compliance_status ?? '—';
+          this.scores[fw] = r.compliance_score_pct ?? 0;
+          this.gaps[fw] = r.gaps ?? [];
+        } catch(e) { this.statuses[fw] = 'ERROR'; this.scores[fw] = 0; this.gaps[fw] = [e.message]; }
+      }));
+      this.loading = false;
+    },
+    getStatus(fw) { return this.statuses[fw] ?? '…'; },
+    getScore(fw) { return this.scores[fw] ?? 0; },
+    getGaps(fw) { return this.gaps[fw] ?? []; },
+    statusBorder(s) {
+      if (s === 'COMPLIANT') return 'border-emerald-700';
+      if (s === 'PARTIALLY_COMPLIANT') return 'border-amber-700';
+      if (s === 'NON_COMPLIANT') return 'border-red-700';
+      return 'border-slate-700';
+    },
+    statusBadge(s) {
+      if (s === 'COMPLIANT') return 'bg-emerald-900 text-emerald-300';
+      if (s === 'PARTIALLY_COMPLIANT') return 'bg-amber-900 text-amber-300';
+      if (s === 'NON_COMPLIANT') return 'bg-red-900 text-red-300';
+      return 'bg-slate-700 text-slate-300';
+    },
+    barColor(s) {
+      if (s === 'COMPLIANT') return 'bg-emerald-500';
+      if (s === 'PARTIALLY_COMPLIANT') return 'bg-amber-500';
+      return 'bg-red-500';
+    }
+  };
+}
+
+// Clock
+setInterval(() => {
+  const el = document.getElementById('clock');
+  if (el) el.textContent = new Date().toISOString().replace('T',' ').slice(0,19) + ' UTC';
+}, 1000);
 </script>
 
 </body>
