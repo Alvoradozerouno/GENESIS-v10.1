@@ -17,6 +17,7 @@ Docs:  http://localhost:8080/docs
 
 import json
 import hashlib
+import logging
 import sqlite3
 import sys
 import os
@@ -78,6 +79,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─────────────────────────────────────────────────────────────
+# STRUCTURED LOGGING — JSON output for Docker/log aggregators
+# Replaces raw print() calls; pipe to Loki / CloudWatch / etc.
+# ─────────────────────────────────────────────────────────────
+
+class _JsonFormatter(logging.Formatter):
+    """Emit every log record as a single-line JSON object."""
+    def format(self, record: logging.LogRecord) -> str:
+        log: dict = {
+            "ts":     datetime.now(timezone.utc).isoformat(),
+            "level":  record.levelname,
+            "logger": record.name,
+            "msg":    record.getMessage(),
+        }
+        if record.exc_info:
+            log["exc"] = self.formatException(record.exc_info)
+        return json.dumps(log)
+
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_JsonFormatter())
+_log = logging.getLogger("genesis")
+_log.setLevel(logging.INFO)
+_log.handlers = [_handler]
+_log.propagate = False
 
 # ─────────────────────────────────────────────────────────────
 # AUTHENTICATION — X-API-Key header or Bearer token
@@ -254,7 +281,7 @@ def _model_r2() -> float:
 
 
 _MODEL_R2 = _model_r2()
-print(f"✅ Risk Engine loaded | R²={_MODEL_R2} | 9 framework profiles | Features: cpu,memory,network_io,disk_usage,error_rate")
+_log.info("risk_engine_loaded", extra={"r2": _MODEL_R2, "frameworks": len(_FW_WEIGHTS), "features": "cpu,memory,network_io,disk_usage,error_rate"})
 
 # ─────────────────────────────────────────────────────────────
 # LOCAL AI (llama.cpp) CONFIG
@@ -849,6 +876,49 @@ def get_audit_log(limit: int = 50):
     }
 
 
+# ─────────────────────────────────────────────────────────────
+# OBSERVABILITY — Prometheus /metrics (stdlib, no extra deps)
+# ─────────────────────────────────────────────────────────────
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics():
+    """Prometheus text-format exposition endpoint. Scrape with any standard collector."""
+    from fastapi.responses import PlainTextResponse
+    audit_cnt   = _audit_count()
+    rate_active = sum(len(v) for v in _rate_buckets.values())
+    lines = [
+        "# HELP genesis_up GENESIS API health (1 = operational)",
+        "# TYPE genesis_up gauge",
+        "genesis_up 1",
+        "",
+        "# HELP genesis_model_r2 Risk engine R-squared (Basel III calibration anchors)",
+        "# TYPE genesis_model_r2 gauge",
+        f"genesis_model_r2 {_MODEL_R2}",
+        "",
+        "# HELP genesis_frameworks_total Loaded EU compliance framework count",
+        "# TYPE genesis_frameworks_total gauge",
+        f"genesis_frameworks_total {len(FRAMEWORKS)}",
+        "",
+        "# HELP genesis_audit_entries_total Immutable SQLite audit log entry count",
+        "# TYPE genesis_audit_entries_total counter",
+        f"genesis_audit_entries_total {audit_cnt}",
+        "",
+        "# HELP genesis_rate_window_entries Active sliding-window rate-limit entries",
+        "# TYPE genesis_rate_window_entries gauge",
+        f"genesis_rate_window_entries {rate_active}",
+        "",
+        "# HELP genesis_rate_limit_global Global read requests/min limit per IP",
+        "# TYPE genesis_rate_limit_global gauge",
+        f"genesis_rate_limit_global {_RATE_GLOBAL}",
+        "",
+        "# HELP genesis_rate_limit_write Write requests/min limit per IP",
+        "# TYPE genesis_rate_limit_write gauge",
+        f"genesis_rate_limit_write {_RATE_WRITE}",
+        "",
+    ]
+    return PlainTextResponse("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 @app.get("/api/valuation", tags=["Market Intelligence"])
 def market_valuation():
     """GENESIS v10.1 market valuation summary (4 independent methods)."""
@@ -891,12 +961,11 @@ def market_valuation():
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("  GENESIS v10.1 - Sovereign AI OS")
-    print("  9 EU Compliance Frameworks | €345M Valuation")
-    print("="*60)
-    print("  API Docs:  http://localhost:8080/docs")
-    print("  ReDoc:     http://localhost:8080/redoc")
-    print("  Health:    http://localhost:8080/api/health")
-    print("="*60 + "\n")
+    _log.info("genesis_startup", extra={
+        "api_docs":  "http://localhost:8080/docs",
+        "health":    "http://localhost:8080/api/health",
+        "metrics":   "http://localhost:8080/metrics",
+        "version":   "10.1.0",
+        "frameworks": len(FRAMEWORKS),
+    })
     uvicorn.run(app, host="0.0.0.0", port=8080, reload=False)

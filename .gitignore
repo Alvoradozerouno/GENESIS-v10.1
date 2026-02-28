@@ -95,3 +95,11 @@ vault-keys.txt
 # Temporary deployment files
 /workdir/
 /tmp/
+
+# Runtime data — SQLite DB, AI models, GGUF model files
+data/
+models/
+*.db
+*.db-shm
+*.db-wal
+*.gguf

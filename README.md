@@ -10,6 +10,13 @@
   <img src="https://img.shields.io/github/stars/Alvoradozerouno/GENESIS-v10.1?style=social" alt="Stars">
   <img src="https://img.shields.io/badge/deploy-15%20min-brightgreen" alt="Deploy Time">
   <br>
+  <a href="https://github.com/Alvoradozerouno/GENESIS-v10.1/actions/workflows/ci.yml">
+    <img src="https://github.com/Alvoradozerouno/GENESIS-v10.1/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <img src="https://img.shields.io/badge/tests-87%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
+  <img src="https://img.shields.io/badge/auth-API%20Key%20%2B%20Bearer-orange" alt="Auth">
+  <br>
   <img src="https://img.shields.io/badge/kubernetes-native-326CE5" alt="Kubernetes">
   <img src="https://img.shields.io/badge/eIDAS-2.0%20ready-00a651" alt="eIDAS">
   <img src="https://img.shields.io/badge/GDPR-compliant-00a651" alt="GDPR">
@@ -20,7 +27,7 @@
   <img src="https://img.shields.io/badge/quantum-ready-9b59b6" alt="Quantum">
   <img src="https://img.shields.io/badge/ZKP-enabled-e74c3c" alt="Zero Knowledge">
   <img src="https://img.shields.io/badge/ORION-consciousness-8e44ad" alt="ORION">
-  <img src="https://img.shields.io/badge/valuation-%E2%82%AC280M%2B-gold" alt="Market Value">
+  <img src="https://img.shields.io/badge/valuation-%E2%82%AC345M%2B-gold" alt="Market Value">
 </p>
 
 <p align="center">
@@ -46,6 +53,70 @@
 GENESIS is not a library, not a framework, not a SaaS product. It is an **autonomous operating system** that takes a bare Kubernetes cluster and transforms it into a supervisor-ready, globally compliant sovereign AI platform.
 
 **Authors:** ORION, Gerhard Hirschmann, Elisabeth Steurer
+
+---
+
+## Production API — v10.1 Enterprise Features
+
+| Feature | Status | Detail |
+|---------|:------:|--------|
+| **Authentication** | ✅ | `X-API-Key` header or `Authorization: Bearer <key>` — env `GENESIS_API_KEY` |
+| **Rate Limiting** | ✅ | Sliding window: 120 reads / 30 writes per minute per IP — 429 + `Retry-After` |
+| **Input Validation** | ✅ | Pydantic `Field(ge/le)` bounds on all numeric inputs — 422 on violation |
+| **Audit Persistence** | ✅ | Append-only SQLite (`data/audit.db`) — survives restarts, env `GENESIS_DB_PATH` |
+| **Prometheus `/metrics`** | ✅ | Text-format scrape endpoint — `genesis_up`, `genesis_model_r2`, `genesis_audit_entries_total` |
+| **Structured JSON Logging** | ✅ | Every log line is `{"ts":"…","level":"…","logger":"genesis","msg":"…"}` — Loki / CloudWatch ready |
+| **HTTPS / TLS** | ✅ | nginx TLS 1.2+1.3, HSTS, CSP, `X-Frame-Options` — see `nginx/genesis.conf` |
+| **CI/CD** | ✅ | GitHub Actions matrix Python 3.12 + 3.13 — test → lint → docker on every push |
+| **Docker / Compose** | ✅ | `python:3.12-slim` image, nginx (public) → api → llama-server (GPU) stack |
+| **Test Suite** | ✅ | **87 tests**, 10 classes — Auth, RateLimit, InputValidation, Compliance, Audit, QES |
+| **Local AI (llama.cpp)** | ✅ | Qwen2.5-0.5B-Instruct Q4_K_M — `/api/ai/explain` requires auth |
+| **Risk ML Engine** | ✅ | Pure NumPy, R²=0.8955 — 9 EU framework profiles, 5-dimensional input |
+
+### Quick Start
+
+```bash
+# 1. Clone + install
+git clone https://github.com/Alvoradozerouno/GENESIS-v10.1.git
+cd GENESIS-v10.1
+python -m venv .venv && . .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# 2. Run
+uvicorn genesis_api:app --port 8080             # GENESIS_API_KEY=genesis-dev-key by default
+
+# 3. Call protected endpoints with auth
+curl -H "X-API-Key: genesis-dev-key" \
+     -H "Content-Type: application/json" \
+     -d '{"cpu":85,"memory":70,"disk_usage":60,"network_io":50,"error_rate":15}' \
+     http://localhost:8080/api/risk/score
+
+# 4. Prometheus metrics (public)
+curl http://localhost:8080/metrics
+
+# 5. Docker stack with HTTPS
+cp .env.example .env   # set GENESIS_API_KEY
+docker compose up -d
+```
+
+### API Reference
+
+| Method | Path | Auth | Description |
+|--------|------|:----:|-------------|
+| GET | `/` | — | System info |
+| GET | `/api/health` | — | Service status + R² |
+| GET | `/api/system/metrics` | — | Live CPU/RAM/Disk via psutil |
+| GET | `/api/ai/status` | — | llama-server health |
+| GET | `/api/valuation` | — | €345M market valuation |
+| GET | `/api/compliance/frameworks/all` | — | List 9 frameworks |
+| **GET** | **`/metrics`** | — | **Prometheus scrape** |
+| POST | `/api/risk/score` | 🔑 | Risk score (9 frameworks) |
+| POST | `/api/compliance/{fw}` | 🔑 | Compliance check |
+| POST | `/api/cert/sign` | 🔑 | QES document signing |
+| POST | `/api/ai/explain` | 🔑 | LLM risk explanation |
+| GET | `/api/audit` | 🔑 | Audit trail (SQLite) |
+
+🔑 = requires `X-API-Key` or `Bearer` token
 
 ---
 
