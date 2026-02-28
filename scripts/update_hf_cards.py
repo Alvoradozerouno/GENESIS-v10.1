@@ -8,8 +8,10 @@ Usage:
 Both repos receive updated README.md reflecting v10.1 enterprise features:
   - API Key auth (X-API-Key / Bearer)
   - Rate limiting (120r/30w per minute, sliding window)
-  - 87 pytest tests (Python 3.12 + 3.13 CI matrix)
-  - Prometheus /metrics endpoint
+  - 94 pytest tests (Python 3.12 + 3.13 CI matrix)
+  - Multi-tenant API keys (SQLite, SHA-256-hashed; CRUD admin routes)
+  - Prometheus /metrics endpoint (7 metrics incl. genesis_api_keys_total)
+  - Grafana dashboard (8 panels, grafana/genesis-dashboard.json)
   - Structured JSON logging
   - Dockerfile + docker-compose (nginx HTTPS)
   - SQLite audit persistence
@@ -88,9 +90,11 @@ Each profile uses framework-specific feature weights derived from EBA supervisor
 | Rate limiting: 30 writes/60s/IP (sliding window) | ✅ |
 | Input bounds: all numeric fields `ge/le` validated | ✅ |
 | SQLite audit persistence | ✅ |
-| Prometheus `/metrics` | ✅ |
+| Multi-tenant API keys (SHA-256 CRUD admin routes) | ✅ |
+| Prometheus `/metrics` (7 metrics) | ✅ |
+| Grafana dashboard (8 panels, import-ready) | ✅ |
 | Structured JSON logging | ✅ |
-| 87 pytest tests (CI Python 3.12 + 3.13) | ✅ |
+| 94 pytest tests (CI Python 3.12 + 3.13) | ✅ |
 | Docker + nginx HTTPS | ✅ |
 
 ## Usage
@@ -219,9 +223,11 @@ Rule-based EU regulatory compliance checker covering **9 frameworks** with frame
 | Rate limiting: 30 writes/60s/IP (sliding window) | ✅ |
 | Input bounds: all numeric fields `ge/le` validated | ✅ |
 | SQLite audit persistence | ✅ |
-| Prometheus `/metrics` | ✅ |
+| Multi-tenant API keys (SHA-256 CRUD admin routes) | ✅ |
+| Prometheus `/metrics` (7 metrics) | ✅ |
+| Grafana dashboard (8 panels, import-ready) | ✅ |
 | Structured JSON logging | ✅ |
-| 87 pytest tests (CI Python 3.12 + 3.13) | ✅ |
+| 94 pytest tests (CI Python 3.12 + 3.13) | ✅ |
 | Docker + nginx HTTPS | ✅ |
 
 ## Usage
@@ -313,7 +319,7 @@ for repo_id, card_content, repo_type in UPDATES:
             path_in_repo="README.md",
             repo_id=repo_id,
             repo_type=repo_type,
-            commit_message="[GENESIS v10.1] Enterprise hardening: auth + rate limiting + 87 tests + Prometheus + JSON logging",
+            commit_message="[GENESIS v10.1] Multi-tenant keys + 94 tests + Grafana + Prometheus",
         )
         print(f"  ✅ {repo_id} updated → https://huggingface.co/{repo_id}")
     except Exception as e:
