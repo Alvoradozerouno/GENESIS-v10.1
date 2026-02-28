@@ -20,6 +20,10 @@
     <span class="text-emerald-400">FIPS: ON</span>
     <span class="text-emerald-400">HSM: ON</span>
     <span class="text-indigo-400">eIDAS 2.0</span>
+    <span x-data="{ready:false,async init(){try{const d=await(await fetch('http://localhost:8080/api/ai/status')).json();this.ready=d.llama_server==='online'}catch(e){}}}" x-init="init()" class="flex items-center gap-1.5">
+      <span class="w-2 h-2 rounded-full transition-colors" :class="ready?'bg-emerald-400 animate-pulse':'bg-slate-600'"></span>
+      <span class="text-xs transition-colors" :class="ready?'text-emerald-400':'text-slate-500'" x-text="ready?'AI\u00a0ON':'AI\u00a0OFF'"></span>
+    </span>
     <span class="text-slate-500" id="clock"></span>
   </div>
 </nav>
@@ -189,41 +193,63 @@ EOF</pre>
   <div x-show="activeTab === 'risk'" class="bg-slate-900 border border-slate-800 rounded-xl p-6" x-data="singleRisk()" x-init="init()">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-lg font-semibold">Risk Deep-Dive</h2>
-      <select x-model="framework" @change="fetch()" class="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-1.5">
-        <template x-for="fw in frameworks"><option :value="fw" x-text="fw.replace('_','-').toUpperCase()"></option></template>
-      </select>
+      <div class="flex items-center gap-2">
+        <template x-if="loading"><span class="text-xs text-slate-500 animate-pulse">Computing…</span></template>
+        <select x-model="framework" @change="run()" class="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-1.5">
+          <template x-for="fw in fwList"><option :value="fw" x-text="fw.replace('_','-').toUpperCase()"></option></template>
+        </select>
+      </div>
     </div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
       <div class="bg-slate-950 rounded-lg p-4">
         <div class="text-slate-500 text-xs mb-1">Risk Score</div>
-        <div class="text-3xl font-bold" :class="riskColor(result.risk_score)" x-text="result.risk_score || '—'"></div>
+        <div class="text-3xl font-bold" :class="scoreClass()" x-text="result?.risk_score ?? '\u2014'"></div>
       </div>
       <div class="bg-slate-950 rounded-lg p-4">
         <div class="text-slate-500 text-xs mb-1">Level</div>
-        <div class="text-xl font-bold" :class="riskColor(result.risk_score)" x-text="result.risk_level || '—'"></div>
+        <div class="text-xl font-bold" :class="scoreClass()" x-text="result?.risk_level ?? '\u2014'"></div>
       </div>
       <div class="bg-slate-950 rounded-lg p-4">
-        <div class="text-slate-500 text-xs mb-1">Model R²</div>
-        <div class="text-xl font-bold text-indigo-400" x-text="result.model_confidence_r2 || '—'"></div>
+        <div class="text-slate-500 text-xs mb-1">Model R\u00b2</div>
+        <div class="text-xl font-bold text-indigo-400" x-text="result?.model_confidence_r2 ?? '\u2014'"></div>
       </div>
       <div class="bg-slate-950 rounded-lg p-4 col-span-1">
         <div class="text-slate-500 text-xs mb-1">Regulatory Action</div>
-        <div class="text-xs text-amber-300 mt-1" x-text="result.regulatory_action || '—'"></div>
+        <div class="text-xs text-amber-300 mt-1" x-text="result?.regulatory_action ?? '\u2014'"></div>
       </div>
     </div>
-    <div class="bg-slate-950 rounded-lg p-4">
+    <div class="bg-slate-950 rounded-lg p-4 mb-4">
       <div class="text-slate-500 text-xs uppercase tracking-wider mb-3">Feature Importance (framework weights)</div>
       <div class="space-y-2">
-        <template x-for="(val, key) in result.feature_importance">
+        <template x-for="(val, key) in (result?.feature_importance ?? {})">
           <div class="flex items-center gap-3">
             <span class="text-xs text-slate-400 w-24" x-text="key"></span>
             <div class="flex-1 bg-slate-800 rounded-full h-2">
-              <div class="h-2 rounded-full bg-indigo-500" :style="'width:' + (val*100/0.40*100) + '%'"></div>
+              <div class="h-2 rounded-full bg-indigo-500" :style="'width:' + featPct(val) + '%'"></div>
             </div>
             <span class="text-xs font-mono text-slate-300 w-10 text-right" x-text="(val*100).toFixed(0)+'%'"></span>
           </div>
         </template>
       </div>
+    </div>
+    <!-- AI Explain -->
+    <div class="bg-slate-950 rounded-lg p-4">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-slate-500 text-xs uppercase tracking-wider">AI Explanation <span class="text-slate-600 normal-case">(Qwen2.5-0.5B local)</span></div>
+        <button @click="explain()" :disabled="aiLoading || !result"
+          class="px-3 py-1 text-xs bg-violet-700 hover:bg-violet-600 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg transition-colors">
+          <span x-text="aiLoading ? 'Thinking\u2026' : '\u2736 Explain'"></span>
+        </button>
+      </div>
+      <template x-if="aiError">
+        <div class="text-xs text-amber-400 bg-amber-950/40 rounded p-2" x-text="aiError"></div>
+      </template>
+      <template x-if="aiExplain && !aiError">
+        <div class="text-sm text-slate-300 leading-relaxed bg-slate-900/80 rounded-lg p-3 border border-violet-800/30" x-text="aiExplain"></div>
+      </template>
+      <template x-if="!aiExplain && !aiError && !aiLoading">
+        <div class="text-xs text-slate-600 italic">Start llama-server (scripts/start_llama.ps1) then click \u2736 Explain for an AI-generated compliance summary.</div>
+      </template>
     </div>
   </div>
 
@@ -347,7 +373,7 @@ function liveRisk() {
 function euMatrix() {
   return {
     metrics: { cpu: 67, memory: 75.1, network_io: 2, disk_usage: 84.9, error_rate: 0 },
-    rows: [], loading: false, barChart: null, radarChart: null, _timer: null,
+    rows: [], loading: false, barChart: null, radarChart: null, _timer: null, lastUpdate: '—',
     async init() {
       await this.refresh();
     },
@@ -366,13 +392,16 @@ function euMatrix() {
             fetch(`${API}/api/risk/score`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(rBody) }).then(r=>r.json()),
             fetch(`${API}/api/compliance/${fw}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...BASE_COMPLIANCE, framework:fw}) }).then(r=>r.json()).catch(()=>({}))
           ]);
+          const fi = rRes.feature_importance ?? {};
+          const driver = Object.entries(fi).sort((a,b)=>b[1]-a[1])[0]?.[0] ?? '—';
           return { fw, label: FW_LABELS[fw], score: rRes.risk_score ?? 0,
             level: rRes.risk_level ?? '—', action: rRes.regulatory_action ?? '—',
-            compliance: cRes.compliance_status ?? '—', pct: cRes.compliance_score_pct ?? 0 };
+            compliance: cRes.compliance_status ?? '—', pct: cRes.compliance_score_pct ?? 0, driver };
         } catch(e) { return { fw, label: FW_LABELS[fw], score: 0, level:'ERR', action:'—', compliance:'ERR', pct:0 }; }
       }));
       this.rows = results;
       this.loading = false;
+      this.lastUpdate = new Date().toISOString().slice(11,19) + ' UTC';
       this.$nextTick(() => this._drawCharts(results));
     },
     _drawCharts(rows) {
@@ -415,11 +444,12 @@ function euMatrix() {
 function singleRisk() {
   return {
     framework: 'dora', result: null, loading: false, error: null,
+    fwList: FRAMEWORKS,
+    aiExplain: null, aiLoading: false, aiError: null,
     metrics: { cpu: 67, memory: 75.1, network_io: 2, disk_usage: 84.9, error_rate: 0 },
-    fwOptions: FRAMEWORKS.map(f => ({ value: f, label: FW_LABELS[f] })),
     async init() { await this.run(); },
     async run() {
-      this.loading = true; this.error = null;
+      this.loading = true; this.error = null; this.aiExplain = null; this.aiError = null;
       try {
         const body = { cpu_usage_pct: this.metrics.cpu, memory_usage_pct: this.metrics.memory,
           network_io_mbps: this.metrics.network_io, disk_usage_pct: this.metrics.disk_usage,
@@ -430,12 +460,31 @@ function singleRisk() {
       } catch(e) { this.error = e.message; }
       this.loading = false;
     },
+    async explain() {
+      if (!this.result) return;
+      this.aiLoading = true; this.aiError = null; this.aiExplain = null;
+      try {
+        const body = {
+          risk_score: this.result.risk_score,
+          risk_level: this.result.risk_level,
+          framework: this.framework,
+          feature_importance: this.result.feature_importance ?? {},
+          regulatory_action: this.result.regulatory_action ?? '',
+        };
+        const r = await (await fetch(`${API}/api/ai/explain`, {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+        })).json();
+        if (r.detail) { this.aiError = r.detail; }
+        else { this.aiExplain = r.explanation; }
+      } catch(e) { this.aiError = 'llama-server offline \u2014 run scripts/start_llama.ps1'; }
+      this.aiLoading = false;
+    },
     scoreClass() { return riskColor(this.result?.risk_score ?? 0); },
     badgeClass() { return levelBadge(this.result?.risk_level); },
     featMax() {
       const fi = this.result?.feature_importance;
-      if (!fi) return 1;
-      return Math.max(...Object.values(fi));
+      if (!fi || Object.keys(fi).length === 0) return 1;
+      return Math.max(...Object.values(fi)) || 1;
     },
     featPct(v) { return ((v / this.featMax()) * 100).toFixed(1); }
   };

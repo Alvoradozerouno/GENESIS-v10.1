@@ -22,10 +22,13 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+import urllib.request
+import urllib.error
+import psutil
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator, Field
 import uvicorn
 
 # ─────────────────────────────────────────────────────────────
@@ -169,10 +172,46 @@ _MODEL_R2 = _model_r2()
 print(f"✅ Risk Engine loaded | R²={_MODEL_R2} | 9 framework profiles | Features: cpu,memory,network_io,disk_usage,error_rate")
 
 # ─────────────────────────────────────────────────────────────
+# LOCAL AI (llama.cpp) CONFIG
+# ─────────────────────────────────────────────────────────────
+LLAMA_BASE = os.environ.get("LLAMA_BASE", "http://localhost:8090")
+LLAMA_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
+
+
+def _llama_available() -> bool:
+    """Quick check if llama-server is accepting connections."""
+    try:
+        req = urllib.request.Request(f"{LLAMA_BASE}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=1):
+            return True
+    except Exception:
+        return False
+
+
+def _llama_complete(prompt: str, max_tokens: int = 150) -> str:
+    """Call llama-server OpenAI-compatible chat endpoint."""
+    payload = json.dumps({
+        "model": "local",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0.3,
+    }).encode()
+    req = urllib.request.Request(
+        f"{LLAMA_BASE}/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read())
+    return data["choices"][0]["message"]["content"].strip()
+
+# ─────────────────────────────────────────────────────────────
 # SCHEMAS
 # ─────────────────────────────────────────────────────────────
 
 class RiskInput(BaseModel):
+    """Accepts both legacy (cpu) and dashboard (cpu_usage_pct) field naming."""
     cpu: float = 75.0
     memory: float = 65.0
     network_io: float = 50.0
@@ -180,6 +219,32 @@ class RiskInput(BaseModel):
     error_rate: float = 12.0
     tenant_id: Optional[str] = "default"
     framework: Optional[str] = "basel_iii"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_field_names(cls, values: dict) -> dict:
+        """Map dashboard field names (cpu_usage_pct) → internal names (cpu)."""
+        if isinstance(values, dict):
+            aliases = {
+                "cpu_usage_pct": "cpu",
+                "memory_usage_pct": "memory",
+                "network_io_mbps": "network_io",
+                "disk_usage_pct": "disk_usage",
+                "error_rate_pct": "error_rate",
+            }
+            for alias, field in aliases.items():
+                if alias in values and field not in values:
+                    values[field] = values.pop(alias)
+        return values
+
+
+class LlamaExplainRequest(BaseModel):
+    risk_score: float
+    risk_level: str
+    framework: str
+    feature_importance: dict = {}
+    regulatory_action: str = ""
+    max_tokens: int = 150
 
 class ComplianceCheck(BaseModel):
     tenant_id: str = "bank_001"
@@ -324,6 +389,7 @@ def root():
 
 @app.get("/api/health", tags=["Operations"])
 def health():
+    ai_ready = _llama_available()
     return {
         "status": "healthy",
         "services": {
@@ -332,11 +398,94 @@ def health():
             "qes_client": "operational",
             "audit_trail": "operational",
             "api_gateway": "operational",
+            "local_ai_llm": "operational" if ai_ready else "offline – run scripts/start_llama.ps1",
         },
+        "model_r2": _MODEL_R2,
         "model_cv_r2": _MODEL_R2,
         "frameworks_loaded": len(FRAMEWORKS),
         "audit_entries": len(audit_log),
+        "local_ai_ready": ai_ready,
+        "llama_model": os.path.basename(LLAMA_MODEL),
         "uptime_check": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/system/metrics", tags=["Operations"])
+def system_metrics():
+    """Live system metrics via psutil — used by dashboard sliders."""
+    cpu = psutil.cpu_percent(interval=0.5)
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/" if sys.platform != "win32" else "C:\\")
+    net_before = psutil.net_io_counters()
+    import time; time.sleep(0.25)
+    net_after = psutil.net_io_counters()
+    net_mbps = round((net_after.bytes_recv - net_before.bytes_recv + net_after.bytes_sent - net_before.bytes_sent) / 0.25 / 1e6, 2)
+    return {
+        "cpu_usage_pct": round(cpu, 1),
+        "memory_usage_pct": round(mem.percent, 1),
+        "disk_usage_pct": round(disk.percent, 1),
+        "network_io_mbps": round(net_mbps, 2),
+        "error_rate_pct": 0.0,
+        "memory_total_gb": round(mem.total / 1e9, 1),
+        "memory_used_gb": round(mem.used / 1e9, 1),
+        "disk_total_gb": round(disk.total / 1e9, 1),
+        "disk_free_gb": round(disk.free / 1e9, 1),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/ai/status", tags=["Local AI (llama.cpp)"])
+def ai_status():
+    """Check if llama-server is running on port 8090."""
+    ready = _llama_available()
+    return {
+        "llama_server": "online" if ready else "offline",
+        "endpoint": LLAMA_BASE,
+        "model": os.path.basename(LLAMA_MODEL),
+        "model_exists": os.path.isfile(LLAMA_MODEL),
+        "start_cmd": "scripts/start_llama.ps1",
+        "gpu": "RTX 3060 Laptop (Vulkan)",
+    }
+
+
+@app.post("/api/ai/explain", tags=["Local AI (llama.cpp)"])
+def ai_explain(req: LlamaExplainRequest):
+    """
+    Ask local Qwen2.5-0.5B to explain a risk assessment result.
+    Requires llama-server running: scripts/start_llama.ps1
+    """
+    if not _llama_available():
+        raise HTTPException(
+            status_code=503,
+            detail="llama-server offline. Start it with: scripts/start_llama.ps1"
+        )
+    drivers = ", ".join(
+        f"{k}={round(v*100,1)}%" for k, v in sorted(
+            req.feature_importance.items(), key=lambda x: -x[1]
+        )[:3]
+    ) or "unknown"
+    fw_meta = FRAMEWORKS.get(req.framework, {})
+    fw_name = fw_meta.get("name", req.framework.upper())
+    prompt = (
+        f"You are an EU banking compliance analyst. Explain this risk result to a compliance officer in 2-3 concise sentences.\n\n"
+        f"Framework: {fw_name}\n"
+        f"Risk Score: {req.risk_score:.1f}/100 ({req.risk_level})\n"
+        f"Top Risk Drivers: {drivers}\n"
+        f"Required Action: {req.regulatory_action}\n\n"
+        f"Explanation:"
+    )
+    try:
+        explanation = _llama_complete(prompt, req.max_tokens)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM inference failed: {e}")
+    log_audit("ai_explain", {"framework": req.framework, "score": req.risk_score})
+    return {
+        "framework": req.framework,
+        "risk_score": req.risk_score,
+        "risk_level": req.risk_level,
+        "explanation": explanation,
+        "model": os.path.basename(LLAMA_MODEL),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
