@@ -20,6 +20,9 @@ import hashlib
 import sqlite3
 import sys
 import os
+import time
+import threading
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -95,6 +98,65 @@ async def require_api_key(
     if auth.startswith("Bearer ") and auth[7:] == _GENESIS_API_KEY:
         return auth[7:]
     raise HTTPException(status_code=401, detail="Missing or invalid API key. Add header: X-API-Key: <key>")
+
+
+# ─────────────────────────────────────────────────────────────
+# RATE LIMITING — sliding window, in-memory, stdlib only
+# Default: 120 req/min per IP on all routes.
+# Protected mutation endpoints: 30 req/min.
+# Override via env: GENESIS_RATE_GLOBAL, GENESIS_RATE_WRITE
+# ─────────────────────────────────────────────────────────────
+_RATE_GLOBAL  = int(os.environ.get("GENESIS_RATE_GLOBAL", "120"))  # per minute, all routes
+_RATE_WRITE   = int(os.environ.get("GENESIS_RATE_WRITE",  "30"))   # per minute, POST endpoints
+_RATE_WINDOW  = 60.0  # seconds
+
+_rate_buckets: dict[str, deque] = defaultdict(deque)  # key → deque of timestamps
+_rate_lock = threading.Lock()
+
+
+def _check_rate(key: str, limit: int) -> tuple[bool, int]:
+    """Sliding-window check. Returns (allowed, remaining)."""
+    now = time.monotonic()
+    cutoff = now - _RATE_WINDOW
+    with _rate_lock:
+        dq = _rate_buckets[key]
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        remaining = max(0, limit - len(dq))
+        if len(dq) >= limit:
+            return False, 0
+        dq.append(now)
+        return True, remaining - 1
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    ip = request.client.host if request.client else "unknown"
+    method = request.method
+    path = request.url.path
+
+    # Determine limit tier
+    is_write = method in ("POST", "PUT", "PATCH", "DELETE")
+    limit = _RATE_WRITE if is_write else _RATE_GLOBAL
+    bucket_key = f"{ip}:{'w' if is_write else 'r'}"
+
+    allowed, remaining = _check_rate(bucket_key, limit)
+    if not allowed:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": f"Rate limit exceeded. Max {limit} {'write' if is_write else 'read'} requests/min per IP.",
+                "retry_after_seconds": int(_RATE_WINDOW),
+            },
+            headers={"Retry-After": str(int(_RATE_WINDOW))},
+        )
+
+    response = await call_next(request)
+    response.headers["X-RateLimit-Limit"] = str(limit)
+    response.headers["X-RateLimit-Remaining"] = str(remaining)
+    response.headers["X-RateLimit-Window"] = "60s"
+    return response
 
 # ─────────────────────────────────────────────────────────────
 # RISK ENGINE — Pure NumPy (sklearn not yet Py3.14 compatible)
@@ -235,13 +297,13 @@ def _llama_complete(prompt: str, max_tokens: int = 150) -> str:
 
 class RiskInput(BaseModel):
     """Accepts both legacy (cpu) and dashboard (cpu_usage_pct) field naming."""
-    cpu: float = 75.0
-    memory: float = 65.0
-    network_io: float = 50.0
-    disk_usage: float = 60.0
-    error_rate: float = 12.0
-    tenant_id: Optional[str] = "default"
-    framework: Optional[str] = "basel_iii"
+    cpu:        float = Field(75.0, ge=0.0, le=100.0,   description="CPU utilisation %")
+    memory:     float = Field(65.0, ge=0.0, le=100.0,   description="Memory utilisation %")
+    network_io: float = Field(50.0, ge=0.0, le=100000.0, description="Network I/O Mbps")
+    disk_usage: float = Field(60.0, ge=0.0, le=100.0,   description="Disk utilisation %")
+    error_rate: float = Field(12.0, ge=0.0, le=100.0,   description="Application error rate %")
+    tenant_id:  Optional[str] = "default"
+    framework:  Optional[str] = "basel_iii"
 
     @model_validator(mode="before")
     @classmethod
@@ -262,12 +324,12 @@ class RiskInput(BaseModel):
 
 
 class LlamaExplainRequest(BaseModel):
-    risk_score: float
-    risk_level: str
-    framework: str
+    risk_score:         float = Field(..., ge=0.0, le=100.0)
+    risk_level:         str
+    framework:          str
     feature_importance: dict = {}
-    regulatory_action: str = ""
-    max_tokens: int = 150
+    regulatory_action:  str = ""
+    max_tokens:         int  = Field(150, ge=1, le=2048)
 
 class ComplianceCheck(BaseModel):
     tenant_id: str = "bank_001"
@@ -294,10 +356,10 @@ class ComplianceCheck(BaseModel):
     xs2a_api_available: bool = False         # PSD2
     best_execution_policy: bool = True       # MiFID II
     transaction_reporting: bool = True       # MiFID II
-    scr_coverage_pct: float = 120.0          # Solvency II (>100% required)
-    orsa_reporting: bool = True              # Solvency II
-    cet1_ratio_pct: float = 12.5             # Basel III/EBA (>4.5% required)
-    lcr_ratio_pct: float = 115.0             # Basel III (>100% required)
+    scr_coverage_pct: float = Field(120.0, ge=0.0,  le=5000.0, description="SCR coverage ratio %")   # Solvency II
+    orsa_reporting:   bool  = True                                                                     # Solvency II
+    cet1_ratio_pct:   float = Field(12.5,  ge=0.0,  le=100.0,  description="CET1 capital ratio %")    # Basel III/EBA
+    lcr_ratio_pct:    float = Field(115.0, ge=0.0,  le=5000.0, description="LCR ratio %")             # Basel III
 
 class SignRequest(BaseModel):
     document_name: str = "compliance_report.pdf"

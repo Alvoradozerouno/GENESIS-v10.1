@@ -7,17 +7,33 @@ Run: pytest tests/ -v
 import sys
 import os
 
+# Set high rate limits BEFORE importing the module — constants are set at import time
+os.environ["GENESIS_RATE_GLOBAL"] = "10000"
+os.environ["GENESIS_RATE_WRITE"]  = "10000"
+
 # Allow importing genesis_api from repo root without install
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from fastapi.testclient import TestClient
 
-from genesis_api import app, _predict_risk, _MODEL_R2, FRAMEWORKS
+import genesis_api
+from genesis_api import app, _predict_risk, _MODEL_R2, FRAMEWORKS, _rate_buckets
 
 client = TestClient(app, headers={"X-API-Key": "genesis-dev-key"})
 
-# ─── Shared payloads ────────────────────────────────────────────────────────
+
+# ─── Fixtures ───────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def reset_rate_buckets():
+    """Clear sliding-window state between tests so they don't bleed into each other."""
+    _rate_buckets.clear()
+    yield
+    _rate_buckets.clear()
+
+
+
 
 METRICS_LOW = dict(cpu=20, memory=15, network_io=5, disk_usage=20, error_rate=0)
 METRICS_HIGH = dict(cpu=95, memory=90, network_io=80, disk_usage=90, error_rate=25)
@@ -331,7 +347,113 @@ class TestSystemMetrics:
         assert 0 <= d["disk_usage_pct"] <= 100
 
 
-# ─── QES / eIDAS ─────────────────────────────────────────────────────────────
+# ─── Input Validation Bounds ────────────────────────────────────────────────
+
+class TestInputValidation:
+    def test_cpu_above_100_rejected(self):
+        body = {**METRICS_LOW, "cpu": 150.0, "framework": "dora"}
+        r = client.post("/api/risk/score", json=body)
+        assert r.status_code == 422
+
+    def test_memory_negative_rejected(self):
+        body = {**METRICS_LOW, "memory": -5.0, "framework": "dora"}
+        r = client.post("/api/risk/score", json=body)
+        assert r.status_code == 422
+
+    def test_error_rate_above_100_rejected(self):
+        body = {**METRICS_LOW, "error_rate": 999.0, "framework": "dora"}
+        r = client.post("/api/risk/score", json=body)
+        assert r.status_code == 422
+
+    def test_cet1_negative_rejected(self):
+        body = {**COMPLIANCE_FULL, "cet1_ratio_pct": -1.0}
+        r = client.post("/api/compliance/eba", json=body)
+        assert r.status_code == 422
+
+    def test_cet1_above_100_rejected(self):
+        body = {**COMPLIANCE_FULL, "cet1_ratio_pct": 9999.0}
+        r = client.post("/api/compliance/eba", json=body)
+        assert r.status_code == 422
+
+    def test_max_tokens_above_2048_rejected(self):
+        r = client.post("/api/ai/explain", json={
+            "risk_score": 45.0, "risk_level": "MEDIUM", "framework": "dora",
+            "max_tokens": 9999
+        })
+        assert r.status_code == 422
+
+    def test_risk_score_above_100_rejected(self):
+        r = client.post("/api/ai/explain", json={
+            "risk_score": 101.0, "risk_level": "MEDIUM", "framework": "dora"
+        })
+        assert r.status_code == 422
+
+    def test_boundary_values_accepted(self):
+        """Edge: exactly 0.0 and 100.0 must be valid."""
+        body = {"cpu": 0.0, "memory": 0.0, "network_io": 0.0,
+                "disk_usage": 0.0, "error_rate": 0.0, "framework": "gdpr"}
+        r = client.post("/api/risk/score", json=body)
+        assert r.status_code == 200
+        body2 = {"cpu": 100.0, "memory": 100.0, "network_io": 100.0,
+                 "disk_usage": 100.0, "error_rate": 100.0, "framework": "gdpr"}
+        r2 = client.post("/api/risk/score", json=body2)
+        assert r2.status_code == 200
+
+
+# ─── Rate Limiting ──────────────────────────────────────────────────────────
+
+class TestRateLimiting:
+    def test_rate_limit_headers_present(self):
+        r = client.get("/api/health")
+        assert "x-ratelimit-limit" in r.headers
+        assert "x-ratelimit-remaining" in r.headers
+        assert "x-ratelimit-window" in r.headers
+
+    def test_remaining_decrements(self):
+        r1 = client.get("/api/health")
+        r2 = client.get("/api/health")
+        rem1 = int(r1.headers.get("x-ratelimit-remaining", 9999))
+        rem2 = int(r2.headers.get("x-ratelimit-remaining", 9999))
+        assert rem2 < rem1, "Remaining must decrease with each request"
+
+    def test_write_limit_lower_than_read(self, monkeypatch):
+        monkeypatch.setattr(genesis_api, "_RATE_GLOBAL", 100)
+        monkeypatch.setattr(genesis_api, "_RATE_WRITE", 30)
+        _rate_buckets.clear()
+        r_read  = client.get("/api/health")
+        r_write = client.post("/api/risk/score", json={**METRICS_LOW, "framework": "dora"})
+        read_limit  = int(r_read.headers.get("x-ratelimit-limit", 0))
+        write_limit = int(r_write.headers.get("x-ratelimit-limit", 0))
+        assert write_limit < read_limit, f"Write limit {write_limit} must be < read limit {read_limit}"
+
+    def test_429_when_limit_exceeded(self, monkeypatch):
+        monkeypatch.setattr(genesis_api, "_RATE_GLOBAL", 3)
+        _rate_buckets.clear()
+        for _ in range(3):
+            client.get("/api/health")
+        r = client.get("/api/health")
+        assert r.status_code == 429
+
+    def test_429_has_retry_after(self, monkeypatch):
+        monkeypatch.setattr(genesis_api, "_RATE_GLOBAL", 1)
+        _rate_buckets.clear()
+        client.get("/api/health")
+        r = client.get("/api/health")
+        assert r.status_code == 429
+        assert "retry_after_seconds" in r.json()
+        assert "Retry-After" in r.headers
+
+    def test_write_429_when_post_limit_exceeded(self, monkeypatch):
+        monkeypatch.setattr(genesis_api, "_RATE_WRITE", 2)
+        _rate_buckets.clear()
+        body = {**METRICS_LOW, "framework": "dora"}
+        for _ in range(2):
+            client.post("/api/risk/score", json=body)
+        r = client.post("/api/risk/score", json=body)
+        assert r.status_code == 429
+
+
+
 
 class TestQES:
     def test_sign_document(self):
