@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GENESIS v10.1 – Sovereign AI OS</title>
+  <style>
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --border:   #30363d;
+      --accent:   #58a6ff;
+      --green:    #3fb950;
+      --yellow:   #d29922;
+      --orange:   #e36209;
+      --red:      #f85149;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --radius:   8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-logo {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, var(--accent), #a371f7);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 18px; color: #fff;
+    }
+    .brand-text h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.4px; }
+    .brand-text p  { font-size: 11px; color: var(--muted); }
+    .header-meta   { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .badge {
+      font-size: 11px; padding: 3px 10px;
+      border-radius: 20px; border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    #status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--muted); display: inline-block;
+      transition: background 0.4s;
+    }
+    #refresh-countdown {
+      font-size: 11px; color: var(--muted);
+    }
+
+    /* ── API Key Banner ── */
+    #api-key-banner {
+      background: #161b22;
+      border-bottom: 1px solid var(--orange);
+      padding: 10px 24px;
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px;
+    }
+    #api-key-banner input {
+      flex: 1; max-width: 360px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 6px 10px;
+      color: var(--text); font-family: monospace; font-size: 13px;
+    }
+    #api-key-banner button {
+      background: var(--accent); color: #0d1117;
+      border: none; border-radius: var(--radius);
+      padding: 6px 14px; cursor: pointer; font-weight: 600; font-size: 13px;
+    }
+    #api-key-banner.hidden { display: none; }
+
+    /* ── Layout ── */
+    main {
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted); margin-bottom: 14px;
+    }
+
+    /* ── Services Grid ── */
+    .services-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .svc {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; padding: 6px 8px;
+      background: var(--bg); border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .svc-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .dot-green  { background: var(--green) !important; }
+    .dot-red    { background: var(--red) !important; }
+    .dot-yellow { background: var(--yellow) !important; }
+
+    /* ── R² Gauge ── */
+    .gauge-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .gauge-arc-wrap { position: relative; width: 160px; height: 90px; overflow: hidden; }
+    .gauge-arc-wrap svg { width: 160px; height: 160px; overflow: visible; }
+    #gauge-label {
+      position: absolute; bottom: 0; left: 50%;
+      transform: translateX(-50%);
+      font-size: 28px; font-weight: 800; color: var(--green);
+    }
+    .gauge-caption { font-size: 11px; color: var(--muted); text-align: center; }
+
+    /* ── Metric Bars ── */
+    .metric-row { margin-bottom: 12px; }
+    .metric-header {
+      display: flex; justify-content: space-between;
+      font-size: 12px; margin-bottom: 5px;
+    }
+    .metric-val { font-weight: 700; }
+    .bar-track {
+      height: 6px; background: var(--bg);
+      border-radius: 3px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .bar-fill {
+      height: 100%; border-radius: 3px;
+      background: var(--green);
+      transition: width 0.6s ease, background 0.4s;
+    }
+
+    /* ── Frameworks Grid ── */
+    .fw-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .fw-item {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px;
+      text-align: center; font-size: 11px;
+    }
+    .fw-name { font-weight: 700; color: var(--accent); font-size: 12px; margin-bottom: 2px; }
+    .fw-auth { color: var(--muted); font-size: 10px; }
+
+    /* ── Audit Log ── */
+    .audit-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 11px;
+    }
+    .audit-table th {
+      text-align: left; color: var(--muted); font-weight: 600;
+      padding: 4px 8px; border-bottom: 1px solid var(--border);
+    }
+    .audit-table td {
+      padding: 5px 8px; border-bottom: 1px solid var(--border);
+      vertical-align: top; word-break: break-word;
+    }
+    .audit-table tr:last-child td { border-bottom: none; }
+    .action-badge {
+      display: inline-block; padding: 2px 7px;
+      border-radius: 10px; font-weight: 600; font-size: 10px;
+      background: #1f2937; color: var(--accent);
+      border: 1px solid var(--border);
+    }
+
+    /* ── Risk Scorer ── */
+    .risk-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .inp-group label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 3px; }
+    .inp-group input[type=range] { width: 100%; accent-color: var(--accent); }
+    .inp-val { font-size: 12px; font-weight: 700; float: right; }
+    .fw-select { width: 100%; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 6px 8px; font-size: 13px; margin-bottom: 10px; }
+    .score-btn {
+      width: 100%; background: var(--accent); color: #0d1117;
+      border: none; border-radius: var(--radius); padding: 9px;
+      cursor: pointer; font-weight: 700; font-size: 14px;
+    }
+    .score-btn:hover { opacity: 0.85; }
+    #risk-result {
+      margin-top: 12px; text-align: center;
+      font-size: 32px; font-weight: 900; display: none;
+    }
+    #risk-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Info Card ── */
+    .kv-row { display: flex; justify-content: space-between; padding: 5px 0;
+      border-bottom: 1px solid var(--border); font-size: 12px; }
+    .kv-row:last-child { border-bottom: none; }
+    .kv-key { color: var(--muted); }
+    .kv-val { font-weight: 600; word-break: break-all; text-align: right; max-width: 60%; }
+
+    /* ── Wide cards ── */
+    .wide { grid-column: 1 / -1; }
+    .half { grid-column: span 2; }
+
+    /* ── Error / loading ── */
+    .loading { color: var(--muted); font-size: 12px; text-align: center; padding: 20px; }
+
+    /* Scrollable audit */
+    .audit-scroll { max-height: 220px; overflow-y: auto; }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .fw-grid { grid-template-columns: repeat(2, 1fr); }
+      .risk-inputs { grid-template-columns: 1fr; }
+      .services-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-logo">G</div>
+    <div class="brand-text">
+      <h1>GENESIS v10.1</h1>
+      <p>Sovereign AI OS · EU Banking Compliance</p>
+    </div>
+  </div>
+  <div class="header-meta">
+    <span class="badge">9 EU Frameworks</span>
+    <span class="badge">Basel III · DORA · AI Act</span>
+    <span id="status-dot"></span>
+    <span id="refresh-countdown">Refreshing…</span>
+  </div>
+</header>
+
+<div id="api-key-banner">
+  <span>🔑 Enter API key to unlock authenticated endpoints:</span>
+  <input type="password" id="api-key-input" placeholder="genesis-key-…" autocomplete="off" />
+  <button onclick="saveApiKey()">Save</button>
+  <button onclick="document.getElementById('api-key-banner').classList.add('hidden')"
+    style="background:var(--border);color:var(--text)">Skip</button>
+</div>
+
+<main>
+
+  <!-- Services Health -->
+  <div class="card">
+    <div class="card-title">Service Health</div>
+    <div class="services-grid" id="services-grid">
+      <div class="loading">Loading…</div>
+    </div>
+    <div style="margin-top:12px; font-size:11px; color:var(--muted)">
+      Audit entries: <strong id="audit-count">—</strong> &nbsp;|&nbsp;
+      Frameworks: <strong id="fw-count">—</strong>
+    </div>
+  </div>
+
+  <!-- R² Gauge -->
+  <div class="card">
+    <div class="card-title">Risk Model · R²</div>
+    <div class="gauge-wrap">
+      <div class="gauge-arc-wrap">
+        <svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+          <!-- Track -->
+          <path d="M 20 100 A 60 60 0 0 1 140 100"
+            fill="none" stroke="#30363d" stroke-width="14" stroke-linecap="round"/>
+          <!-- Filled arc -->
+          <path id="gauge-arc"
+            d="M 20 100 A 60 60 0 0 1 140 100"
+            fill="none" stroke="#3fb950" stroke-width="14" stroke-linecap="round"
+            stroke-dasharray="0 189" />
+        </svg>
+        <div id="gauge-label">—</div>
+      </div>
+      <div class="gauge-caption" id="gauge-caption">Basel III ML Engine · GradientBoosting</div>
+      <div class="gauge-caption" id="cv-r2-label" style="color:var(--accent)"></div>
+    </div>
+  </div>
+
+  <!-- System Metrics -->
+  <div class="card">
+    <div class="card-title">Live System Metrics</div>
+    <div id="metrics-container">
+      <div class="loading">Fetching metrics…</div>
+    </div>
+  </div>
+
+  <!-- Info -->
+  <div class="card">
+    <div class="card-title">System Info</div>
+    <div id="info-kv">
+      <div class="loading">Loading…</div>
+    </div>
+  </div>
+
+  <!-- EU Frameworks -->
+  <div class="card wide">
+    <div class="card-title">EU Regulatory Frameworks (9)</div>
+    <div class="fw-grid" id="fw-grid">
+      <div class="loading">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Risk Scorer -->
+  <div class="card half">
+    <div class="card-title">Live Risk Scorer</div>
+    <select class="fw-select" id="fw-select">
+      <option value="basel_iii">Basel III / CRR</option>
+      <option value="dora">DORA</option>
+      <option value="gdpr">GDPR</option>
+      <option value="ai_act">EU AI Act</option>
+      <option value="mifid_ii">MiFID II</option>
+      <option value="aml6">AML6</option>
+      <option value="psd2">PSD2</option>
+      <option value="solvency_ii">Solvency II</option>
+      <option value="eba">EBA</option>
+    </select>
+    <div class="risk-inputs" id="risk-inputs">
+      <div class="inp-group">
+        <label>CPU % <span class="inp-val" id="v-cpu">75</span></label>
+        <input type="range" min="0" max="100" value="75" id="s-cpu" oninput="document.getElementById('v-cpu').textContent=this.value">
+      </div>
+      <div class="inp-group">
+        <label>Memory % <span class="inp-val" id="v-mem">65</span></label>
+        <input type="range" min="0" max="100" value="65" id="s-mem" oninput="document.getElementById('v-mem').textContent=this.value">
+      </div>
+      <div class="inp-group">
+        <label>Network Mbps <span class="inp-val" id="v-net">50</span></label>
+        <input type="range" min="0" max="1000" value="50" id="s-net" oninput="document.getElementById('v-net').textContent=this.value">
+      </div>
+      <div class="inp-group">
+        <label>Disk % <span class="inp-val" id="v-disk">60</span></label>
+        <input type="range" min="0" max="100" value="60" id="s-disk" oninput="document.getElementById('v-disk').textContent=this.value">
+      </div>
+      <div class="inp-group">
+        <label>Error Rate % <span class="inp-val" id="v-err">12</span></label>
+        <input type="range" min="0" max="100" value="12" id="s-err" oninput="document.getElementById('v-err').textContent=this.value">
+      </div>
+    </div>
+    <button class="score-btn" onclick="computeRisk()">Compute Risk Score →</button>
+    <div id="risk-result">—</div>
+    <div id="risk-sub"></div>
+    <div id="risk-action" style="font-size:11px;color:var(--muted);margin-top:8px;"></div>
+  </div>
+
+  <!-- Audit Log -->
+  <div class="card half">
+    <div class="card-title">Audit Trail (latest 10)</div>
+    <div class="audit-scroll">
+      <table class="audit-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Action</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="audit-body">
+          <tr><td colspan="3" class="loading">Requires API key</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+const BASE = window.location.origin === 'null' ? 'http://localhost:8080' : window.location.origin;
+
+// ── API Key management ──────────────────────────────────────────
+function getKey() { return localStorage.getItem('genesis_api_key') || ''; }
+function saveApiKey() {
+  const k = document.getElementById('api-key-input').value.trim();
+  if (k) {
+    localStorage.setItem('genesis_api_key', k);
+    document.getElementById('api-key-banner').classList.add('hidden');
+    refresh();
+  }
+}
+
+// Show banner only if no key stored
+if (getKey()) document.getElementById('api-key-banner').classList.add('hidden');
+
+function authHeaders() {
+  const k = getKey();
+  return k ? { 'X-API-Key': k } : {};
+}
+
+// ── Color helpers ───────────────────────────────────────────────
+function riskColor(score) {
+  if (score >= 80) return 'var(--red)';
+  if (score >= 60) return 'var(--orange)';
+  if (score >= 40) return 'var(--yellow)';
+  return 'var(--green)';
+}
+function barColor(pct) {
+  if (pct >= 85) return 'var(--red)';
+  if (pct >= 65) return 'var(--orange)';
+  if (pct >= 40) return 'var(--yellow)';
+  return 'var(--green)';
+}
+
+// ── R² Gauge ────────────────────────────────────────────────────
+function setGauge(r2) {
+  const ARC_LEN = 189; // half-circle circumference at r=60
+  const fill = Math.max(0, Math.min(1, r2)) * ARC_LEN;
+  const arc = document.getElementById('gauge-arc');
+  const lbl = document.getElementById('gauge-label');
+  arc.setAttribute('stroke-dasharray', `${fill.toFixed(1)} ${ARC_LEN}`);
+  arc.setAttribute('stroke', r2 > 0.85 ? '#3fb950' : r2 > 0.70 ? '#d29922' : '#f85149');
+  lbl.textContent = r2.toFixed(4);
+  lbl.style.color  = r2 > 0.85 ? 'var(--green)' : r2 > 0.70 ? 'var(--yellow)' : 'var(--red)';
+}
+
+// ── Refresh health ───────────────────────────────────────────────
+async function refreshHealth() {
+  try {
+    const r = await fetch(`${BASE}/api/health`);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+
+    document.getElementById('status-dot').style.background = 'var(--green)';
+    document.getElementById('audit-count').textContent = d.audit_entries ?? '—';
+    document.getElementById('fw-count').textContent     = d.frameworks_loaded ?? '—';
+
+    if (d.model_r2 != null) setGauge(d.model_r2);
+
+    const svcMap = d.services || {};
+    const el = document.getElementById('services-grid');
+    el.innerHTML = Object.entries(svcMap).map(([name, status]) => {
+      const ok     = typeof status === 'string' && status.toLowerCase().startsWith('op');
+      const warn   = typeof status === 'string' && status.toLowerCase().startsWith('off');
+      const cls    = ok ? 'dot-green' : warn ? 'dot-yellow' : 'dot-red';
+      const label  = name.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+      return `<div class="svc"><div class="svc-dot ${cls}"></div><span title="${status}">${label}</span></div>`;
+    }).join('');
+
+    // Info card
+    document.getElementById('info-kv').innerHTML = `
+      <div class="kv-row"><span class="kv-key">Model R²</span><span class="kv-val" style="color:var(--green)">${d.model_r2}</span></div>
+      <div class="kv-row"><span class="kv-key">Frameworks</span><span class="kv-val">${d.frameworks_loaded}</span></div>
+      <div class="kv-row"><span class="kv-key">Audit Entries</span><span class="kv-val">${d.audit_entries}</span></div>
+      <div class="kv-row"><span class="kv-key">Local LLM</span><span class="kv-val" style="color:${d.local_ai_ready ? 'var(--green)' : 'var(--muted)'}">${d.local_ai_ready ? 'Online' : 'Offline'}</span></div>
+      <div class="kv-row"><span class="kv-key">LLM Model</span><span class="kv-val">${d.llama_model || '—'}</span></div>
+      <div class="kv-row"><span class="kv-key">Version</span><span class="kv-val">GENESIS 10.1</span></div>
+      <div class="kv-row"><span class="kv-key">Docs</span><span class="kv-val"><a href="/docs" style="color:var(--accent)" target="_blank">/docs</a></span></div>
+    `;
+
+  } catch(e) {
+    document.getElementById('status-dot').style.background = 'var(--red)';
+  }
+}
+
+// ── Refresh system metrics ───────────────────────────────────────
+async function refreshMetrics() {
+  try {
+    const r = await fetch(`${BASE}/api/system/metrics`);
+    if (!r.ok) return;
+    const d = await r.json();
+
+    const metrics = [
+      { label: 'CPU',     val: d.cpu_usage_pct,    unit: '%' },
+      { label: 'Memory',  val: d.memory_usage_pct, unit: `% (${d.memory_used_gb}/${d.memory_total_gb} GB)` },
+      { label: 'Disk',    val: d.disk_usage_pct,   unit: `% (${d.disk_free_gb} GB free)` },
+      { label: 'Network', val: Math.min(d.network_io_mbps / 10, 100).toFixed(1), unit: `% (${d.network_io_mbps} Mbps)`, raw: d.network_io_mbps },
+    ];
+
+    document.getElementById('metrics-container').innerHTML = metrics.map(m => `
+      <div class="metric-row">
+        <div class="metric-header">
+          <span>${m.label}</span>
+          <span class="metric-val" style="color:${barColor(parseFloat(m.val))}">${typeof m.raw !== 'undefined' ? m.raw + ' Mbps' : m.val + m.unit}</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${Math.min(parseFloat(m.val),100)}%;background:${barColor(parseFloat(m.val))}"></div>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) { /* silent */ }
+}
+
+// ── Refresh frameworks grid ──────────────────────────────────────
+async function refreshFrameworks() {
+  try {
+    const r = await fetch(`${BASE}/api/compliance/frameworks/all`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const fw = d.frameworks || {};
+    document.getElementById('fw-grid').innerHTML = Object.entries(fw).map(([key, val]) => `
+      <div class="fw-item">
+        <div class="fw-name">${key.toUpperCase().replace(/_/g,' ')}</div>
+        <div class="fw-auth">${val.authority || ''}</div>
+      </div>
+    `).join('');
+  } catch(e) { /* silent */ }
+}
+
+// ── Refresh audit log ────────────────────────────────────────────
+async function refreshAudit() {
+  const key = getKey();
+  if (!key) return;
+  try {
+    const r = await fetch(`${BASE}/api/audit?limit=10`, { headers: authHeaders() });
+    if (!r.ok) return;
+    const d = await r.json();
+    const rows = (d.entries || []).map(e => {
+      const t = new Date(e.timestamp).toLocaleTimeString();
+      const payload = JSON.stringify(e.payload).substring(0, 60);
+      return `<tr>
+        <td style="white-space:nowrap;color:var(--muted)">${t}</td>
+        <td><span class="action-badge">${e.action}</span></td>
+        <td style="color:var(--muted)">${payload}…</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('audit-body').innerHTML = rows || '<tr><td colspan="3" class="loading">No entries yet</td></tr>';
+  } catch(e) { /* silent */ }
+}
+
+// ── Compute risk score ───────────────────────────────────────────
+async function computeRisk() {
+  const key = getKey();
+  if (!key) {
+    alert('Enter an API key first to use the risk scorer.');
+    return;
+  }
+  const body = {
+    cpu:        parseFloat(document.getElementById('s-cpu').value),
+    memory:     parseFloat(document.getElementById('s-mem').value),
+    network_io: parseFloat(document.getElementById('s-net').value),
+    disk_usage: parseFloat(document.getElementById('s-disk').value),
+    error_rate: parseFloat(document.getElementById('s-err').value),
+    framework:  document.getElementById('fw-select').value,
+    tenant_id:  'dashboard',
+  };
+  try {
+    const r = await fetch(`${BASE}/api/risk/score`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    const resultEl = document.getElementById('risk-result');
+    resultEl.style.display = 'block';
+    resultEl.textContent   = `${d.risk_score?.toFixed(1)} / 100`;
+    resultEl.style.color   = riskColor(d.risk_score || 0);
+    document.getElementById('risk-sub').textContent    = `Level: ${d.risk_level}  |  R² ${d.model_confidence_r2}`;
+    document.getElementById('risk-action').textContent = d.regulatory_action || '';
+  } catch(e) {
+    document.getElementById('risk-result').textContent = 'Error – check API key';
+    document.getElementById('risk-result').style.display = 'block';
+  }
+}
+
+// ── Auto-refresh loop ────────────────────────────────────────────
+let _countdown = 5;
+function tick() {
+  _countdown--;
+  document.getElementById('refresh-countdown').textContent =
+    _countdown > 0 ? `Refresh in ${_countdown}s` : 'Refreshing…';
+  if (_countdown <= 0) {
+    _countdown = 5;
+    refresh();
+  }
+}
+
+async function refresh() {
+  await Promise.all([
+    refreshHealth(),
+    refreshMetrics(),
+    refreshFrameworks(),
+    refreshAudit(),
+  ]);
+}
+
+// Start
+refresh();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

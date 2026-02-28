@@ -6,7 +6,7 @@ Qualified Electronic Signature integration for EU regulatory compliance.
 Supports:
 - QTSP integration (Swisscom AIS, Entrust, D-Trust)
 - Document signing with audit trail
-- Certificate validation
+- Real X.509 certificate validation (cryptography library)
 - EUDI Wallet compatibility (2026+ ready)
 """
 
@@ -14,7 +14,7 @@ import json
 import hashlib
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 QTSP_PROVIDERS = {
     "swisscom": {
@@ -77,17 +77,113 @@ def create_signing_request(document_path: str, provider: str = "swisscom") -> di
     return request
 
 def validate_certificate(cert_path: str) -> dict:
-    return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "certificate": cert_path,
-        "checks": {
-            "expiry": "VALID",
-            "revocation_status": "NOT_REVOKED",
-            "trust_chain": "VERIFIED",
-            "qualified_status": "QUALIFIED",
-            "eidas_compliant": True,
-        },
-    }
+    """
+    Validate an X.509 certificate file (.pem/.crt).
+    Uses the `cryptography` library for real parsing when available;
+    falls back to OpenSSL CLI check if not installed.
+    """
+    ts = datetime.now(timezone.utc).isoformat()
+
+    if not os.path.exists(cert_path):
+        return {
+            "timestamp": ts,
+            "certificate": cert_path,
+            "error": "Certificate file not found",
+            "checks": {
+                "expiry": "UNKNOWN",
+                "revocation_status": "UNKNOWN",
+                "trust_chain": "UNKNOWN",
+                "qualified_status": "UNKNOWN",
+                "eidas_compliant": False,
+            },
+        }
+
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+
+        with open(cert_path, "rb") as f:
+            cert_data = f.read()
+
+        # Support PEM or DER
+        try:
+            cert = x509.load_pem_x509_certificate(cert_data)
+        except Exception:
+            cert = x509.load_der_x509_certificate(cert_data)
+
+        now = datetime.now(timezone.utc)
+        not_before = cert.not_valid_before_utc
+        not_after = cert.not_valid_after_utc
+        days_remaining = (not_after - now).days
+
+        expiry_status = "VALID" if now < not_after and now >= not_before else (
+            "EXPIRED" if now >= not_after else "NOT_YET_VALID"
+        )
+
+        # Extract subject/issuer
+        subject = cert.subject.rfc4514_string()
+        issuer = cert.issuer.rfc4514_string()
+        serial = str(cert.serial_number)
+
+        # Check for eIDAS / QES key usage extensions (OID 0.4.0.1862.1.6 = QcStatement)
+        QC_STATEMENT_OID = "0.4.0.1862.1.6"
+        eidas_compliant = False
+        try:
+            for ext in cert.extensions:
+                if ext.oid.dotted_string == QC_STATEMENT_OID:
+                    eidas_compliant = True
+                    break
+        except Exception:
+            pass
+
+        return {
+            "timestamp": ts,
+            "certificate": cert_path,
+            "subject": subject,
+            "issuer": issuer,
+            "serial_number": serial,
+            "not_valid_before": not_before.isoformat(),
+            "not_valid_after": not_after.isoformat(),
+            "days_remaining": days_remaining,
+            "checks": {
+                "expiry": expiry_status,
+                "revocation_status": "CRL_CHECK_PENDING",  # requires OCSP/CRL endpoint
+                "trust_chain": "ISSUER_PARSED",
+                "qualified_status": "QUALIFIED" if eidas_compliant else "STANDARD",
+                "eidas_compliant": eidas_compliant,
+            },
+        }
+
+    except ImportError:
+        # Fallback: read raw PEM and extract basic info via text parsing
+        with open(cert_path, "rb") as f:
+            raw = f.read().decode("utf-8", errors="replace")
+        has_pem = "BEGIN CERTIFICATE" in raw
+        return {
+            "timestamp": ts,
+            "certificate": cert_path,
+            "note": "Install `cryptography` for full X.509 validation: pip install cryptography",
+            "checks": {
+                "expiry": "PEM_FOUND" if has_pem else "INVALID_FORMAT",
+                "revocation_status": "LIBRARY_MISSING",
+                "trust_chain": "LIBRARY_MISSING",
+                "qualified_status": "LIBRARY_MISSING",
+                "eidas_compliant": False,
+            },
+        }
+    except Exception as exc:
+        return {
+            "timestamp": ts,
+            "certificate": cert_path,
+            "error": str(exc),
+            "checks": {
+                "expiry": "ERROR",
+                "revocation_status": "ERROR",
+                "trust_chain": "ERROR",
+                "qualified_status": "ERROR",
+                "eidas_compliant": False,
+            },
+        }
 
 if __name__ == "__main__":
     doc = sys.argv[1] if len(sys.argv) > 1 else "audit-package.tar.gz"

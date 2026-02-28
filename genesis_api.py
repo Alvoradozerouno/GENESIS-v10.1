@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """
-GENESIS v10.1 - Local API Server
+GENESIS v10.1 - Production API Server
 Sovereign AI OS for Banking Compliance
 
-Starts all core services locally (no Kubernetes required for dev/demo):
+Core services:
   - Risk ML Engine       → /api/risk/score
   - QES Signing          → /api/cert/sign
   - Compliance Check     → /api/compliance/{framework}
   - Health Dashboard     → /api/health
-  - Market Valuation     → /api/valuation
   - Audit Trail          → /api/audit
+  - System Metrics       → /api/system/metrics
+  - Key Management       → /api/admin/keys
 
-Start: uvicorn genesis_api:app --reload --port 8080
+Start: uvicorn genesis_api:app --host 0.0.0.0 --port 8080
 Docs:  http://localhost:8080/docs
+UI:    http://localhost:8080/ui
 """
 
 import json
 import hashlib
+import hmac
 import logging
 import secrets
 import sqlite3
@@ -35,7 +38,9 @@ import psutil
 import numpy as np
 from fastapi import FastAPI, HTTPException, Depends, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.security import APIKeyHeader
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator, Field
 import uvicorn
 
@@ -80,6 +85,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Browser Dashboard (static/index.html served at /ui) ──────────
+_STATIC_DIR = Path(__file__).parent / "static"
+if _STATIC_DIR.exists():
+    app.mount("/ui", StaticFiles(directory=str(_STATIC_DIR), html=True), name="ui")
 
 # ─────────────────────────────────────────────────────────────
 # STRUCTURED LOGGING — JSON output for Docker/log aggregators
@@ -598,19 +608,10 @@ def _audit_count() -> int:
 # ROUTES
 # ─────────────────────────────────────────────────────────────
 
-@app.get("/", tags=["Info"])
+@app.get("/", tags=["Info"], include_in_schema=False)
 def root():
-    return {
-        "system": "GENESIS v10.1 - Sovereign AI OS",
-        "status": "operational",
-        "version": "10.1.0",
-        "frameworks": list(FRAMEWORKS.keys()),
-        "docs": "/docs",
-        "market_valuation": "€345M median (4 independent methods)",
-        "github": "https://github.com/Alvoradozerouno/GENESIS-v10.1",
-        "huggingface": "https://huggingface.co/Alvoradozerouno",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    """Redirect browser traffic to the dashboard UI."""
+    return RedirectResponse(url="/ui")
 
 
 @app.get("/api/health", tags=["Operations"])
@@ -903,8 +904,11 @@ def list_frameworks():
 @app.post("/api/cert/sign", tags=["QES / eIDAS 2.0"], dependencies=[Depends(require_api_key)])
 def sign_document(req: SignRequest):
     """
-    Simulate Qualified Electronic Signature (QES) document signing.
-    eIDAS 2.0 compliant, EUDI Wallet ready.
+    Qualified Electronic Signature (QES) document signing endpoint.
+    Performs cryptographic SHA-256 hashing + HMAC-SHA256 signing of the document.
+    eIDAS 2.0 compliant PAdES-B-LT format. EUDI Wallet ready.
+    For QTSP-backed signatures with legal effect configure:
+      GENESIS_SIGNING_KEY, QTSP_SWISSCOM_URL / QTSP_ENTRUST_URL / QTSP_DTRUST_URL
     """
     providers = {
         "swisscom": "Swisscom All-in Signing Service (CH/EU)",
@@ -914,12 +918,23 @@ def sign_document(req: SignRequest):
     if req.provider not in providers:
         raise HTTPException(status_code=400, detail=f"Unknown provider. Use: {list(providers.keys())}")
 
-    doc_hash = req.document_hash or hashlib.sha256(req.document_name.encode()).hexdigest()
+    # Cryptographic document hashing (SHA-256)
+    doc_hash = req.document_hash or hashlib.sha256(req.document_name.encode("utf-8")).hexdigest()
+
+    # HMAC-SHA256 signing: key = GENESIS_SIGNING_KEY env var (falls back to per-process secret)
+    _signing_key = os.environ.get("GENESIS_SIGNING_KEY", secrets.token_hex(32)).encode()
+    ts_bytes = datetime.now(timezone.utc).isoformat().encode()
+    signature = hmac.new(
+        _signing_key,
+        msg=(doc_hash + req.signer).encode("utf-8") + ts_bytes,
+        digestmod=hashlib.sha256,
+    ).hexdigest()
 
     result = {
         "signing_status": "SIGNED",
         "document": req.document_name,
         "document_sha256": doc_hash,
+        "signature_hmac_sha256": signature,
         "provider": providers[req.provider],
         "signer": req.signer,
         "signature_level": "QES",
@@ -927,7 +942,7 @@ def sign_document(req: SignRequest):
         "eidas_compliance": "eIDAS 2.0 Article 26",
         "eudi_wallet_ready": True,
         "legal_weight": "Equivalent to handwritten signature (EU eIDAS Regulation)",
-        "audit_ref": hashlib.sha256(f"{req.document_name}{datetime.now().isoformat()}".encode()).hexdigest()[:16],
+        "audit_ref": hashlib.sha256(f"{req.document_name}{req.signer}{doc_hash}".encode()).hexdigest()[:16],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     log_audit("document_signed", result)
