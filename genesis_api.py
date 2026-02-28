@@ -18,6 +18,7 @@ Docs:  http://localhost:8080/docs
 import json
 import hashlib
 import logging
+import secrets
 import sqlite3
 import sys
 import os
@@ -107,24 +108,90 @@ _log.handlers = [_handler]
 _log.propagate = False
 
 # ─────────────────────────────────────────────────────────────
-# AUTHENTICATION — X-API-Key header or Bearer token
-# Set env var GENESIS_API_KEY to override the default dev key.
+# AUTHENTICATION — Multi-tenant DB-backed API keys
+# Every key is stored as SHA-256 hash in api_keys table.
+# Master admin key (GENESIS_ADMIN_KEY) manages key lifecycle.
 # ─────────────────────────────────────────────────────────────
-_API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
-_GENESIS_API_KEY = os.environ.get("GENESIS_API_KEY", "genesis-dev-key")
+_API_KEY_HEADER   = APIKeyHeader(name="X-API-Key", auto_error=False)
+_GENESIS_API_KEY  = os.environ.get("GENESIS_API_KEY",  "genesis-dev-key")
+_GENESIS_ADMIN_KEY = os.environ.get("GENESIS_ADMIN_KEY", "genesis-admin-key")
+
+
+def _hash_key(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _lookup_key(raw: str) -> Optional[str]:
+    """Returns tenant_id if key is active, else None."""
+    h = _hash_key(raw)
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT tenant_id FROM api_keys WHERE key_hash=? AND active=1", (h,)
+            ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _seed_default_keys() -> None:
+    """Ensure the default dev + admin keys exist in the DB (idempotent)."""
+    ts = datetime.now(timezone.utc).isoformat()
+    for raw, tenant, name in [
+        (_GENESIS_API_KEY,   "default", "dev-default"),
+        (_GENESIS_ADMIN_KEY, "admin",   "admin-default"),
+    ]:
+        h = _hash_key(raw)
+        try:
+            with sqlite3.connect(_DB_PATH) as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO api_keys (key_hash, tenant_id, name, created_at) VALUES (?,?,?,?)",
+                    (h, tenant, name, ts),
+                )
+                conn.commit()
+        except Exception:
+            pass
+
+
+def _key_count() -> int:
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            return conn.execute("SELECT COUNT(*) FROM api_keys WHERE active=1").fetchone()[0]
+    except Exception:
+        return 0
 
 
 async def require_api_key(
     request: Request,
     api_key: Optional[str] = Security(_API_KEY_HEADER),
 ) -> str:
-    """Accepts X-API-Key header or Authorization: Bearer <key>."""
-    if api_key and api_key == _GENESIS_API_KEY:
-        return api_key
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer ") and auth[7:] == _GENESIS_API_KEY:
-        return auth[7:]
+    """DB-backed multi-tenant auth. Returns tenant_id on success."""
+    raw = api_key
+    if not raw:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            raw = auth[7:]
+    if raw:
+        tenant_id = _lookup_key(raw)
+        if tenant_id:
+            request.state.tenant_id = tenant_id
+            return tenant_id
     raise HTTPException(status_code=401, detail="Missing or invalid API key. Add header: X-API-Key: <key>")
+
+
+async def require_admin_key(
+    request: Request,
+    api_key: Optional[str] = Security(_API_KEY_HEADER),
+) -> None:
+    """Requires the master GENESIS_ADMIN_KEY. Used for key management routes."""
+    raw = api_key
+    if not raw:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            raw = auth[7:]
+    if raw == _GENESIS_ADMIN_KEY:
+        return
+    raise HTTPException(status_code=403, detail="Admin key required. Set X-API-Key to GENESIS_ADMIN_KEY.")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -395,6 +462,11 @@ class SignRequest(BaseModel):
     provider: str = "swisscom"
     framework: str = "eidas_2"
 
+
+class ApiKeyCreate(BaseModel):
+    tenant_id: str = Field(..., description="Tenant identifier (e.g. 'bank_001', 'insurer_de')")
+    name:      str = Field(..., description="Human-readable label for this key")
+
 # ─────────────────────────────────────────────────────────────
 # COMPLIANCE FRAMEWORK DEFINITIONS
 # ─────────────────────────────────────────────────────────────
@@ -487,10 +559,21 @@ def _init_db() -> None:
                 genesis_version  TEXT    NOT NULL DEFAULT '10.1'
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_hash    TEXT    NOT NULL UNIQUE,
+                tenant_id   TEXT    NOT NULL,
+                name        TEXT    NOT NULL,
+                created_at  TEXT    NOT NULL,
+                active      INTEGER NOT NULL DEFAULT 1
+            )
+        """)
         conn.commit()
 
 
 _init_db()
+_seed_default_keys()
 
 
 def log_audit(action: str, payload: dict) -> dict:
@@ -877,6 +960,66 @@ def get_audit_log(limit: int = 50):
 
 
 # ─────────────────────────────────────────────────────────────
+# KEY MANAGEMENT — Admin endpoints
+# Protected by GENESIS_ADMIN_KEY (separate from tenant keys)
+# ─────────────────────────────────────────────────────────────
+
+@app.post("/api/admin/keys", tags=["Key Management"], dependencies=[Depends(require_admin_key)])
+def create_api_key(body: ApiKeyCreate):
+    """
+    Create a new tenant API key. Returns the raw key ONCE — store it securely.
+    Requires X-API-Key set to GENESIS_ADMIN_KEY.
+    """
+    raw = secrets.token_urlsafe(32)
+    h   = _hash_key(raw)
+    ts  = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(_DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO api_keys (key_hash, tenant_id, name, created_at) VALUES (?,?,?,?)",
+            (h, body.tenant_id, body.name, ts),
+        )
+        conn.commit()
+        key_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    log_audit("key_created", {"tenant_id": body.tenant_id, "name": body.name})
+    return {
+        "id": key_id,
+        "key": raw,
+        "tenant_id": body.tenant_id,
+        "name": body.name,
+        "created_at": ts,
+        "warning": "Store this key securely — it cannot be retrieved again.",
+    }
+
+
+@app.get("/api/admin/keys", tags=["Key Management"], dependencies=[Depends(require_admin_key)])
+def list_api_keys():
+    """List all API keys (hashes hidden). Requires admin key."""
+    with sqlite3.connect(_DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, tenant_id, name, created_at, active FROM api_keys ORDER BY id"
+        ).fetchall()
+    return {
+        "total": len(rows),
+        "keys": [
+            {"id": r[0], "tenant_id": r[1], "name": r[2], "created_at": r[3], "active": bool(r[4])}
+            for r in rows
+        ],
+    }
+
+
+@app.delete("/api/admin/keys/{key_id}", tags=["Key Management"], dependencies=[Depends(require_admin_key)])
+def revoke_api_key(key_id: int):
+    """Revoke (soft-delete) a key by id. Requires admin key."""
+    with sqlite3.connect(_DB_PATH) as conn:
+        changed = conn.execute("UPDATE api_keys SET active=0 WHERE id=?", (key_id,)).rowcount
+        conn.commit()
+    if not changed:
+        raise HTTPException(status_code=404, detail=f"Key id={key_id} not found.")
+    log_audit("key_revoked", {"key_id": key_id})
+    return {"revoked": True, "key_id": key_id}
+
+
+# ─────────────────────────────────────────────────────────────
 # OBSERVABILITY — Prometheus /metrics (stdlib, no extra deps)
 # ─────────────────────────────────────────────────────────────
 
@@ -886,6 +1029,7 @@ def prometheus_metrics():
     from fastapi.responses import PlainTextResponse
     audit_cnt   = _audit_count()
     rate_active = sum(len(v) for v in _rate_buckets.values())
+    key_cnt     = _key_count()
     lines = [
         "# HELP genesis_up GENESIS API health (1 = operational)",
         "# TYPE genesis_up gauge",
@@ -902,6 +1046,10 @@ def prometheus_metrics():
         "# HELP genesis_audit_entries_total Immutable SQLite audit log entry count",
         "# TYPE genesis_audit_entries_total counter",
         f"genesis_audit_entries_total {audit_cnt}",
+        "",
+        "# HELP genesis_api_keys_total Active tenant API keys",
+        "# TYPE genesis_api_keys_total gauge",
+        f"genesis_api_keys_total {key_cnt}",
         "",
         "# HELP genesis_rate_window_entries Active sliding-window rate-limit entries",
         "# TYPE genesis_rate_window_entries gauge",

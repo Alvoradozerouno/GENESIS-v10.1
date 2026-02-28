@@ -475,3 +475,73 @@ class TestQES:
             "provider": "unknown_provider", "framework": "eidas_2"
         })
         assert r.status_code == 400
+
+
+# ─── Multi-Tenant Key Management ────────────────────────────────────────────
+
+admin_client = TestClient(app, headers={"X-API-Key": "genesis-admin-key"})
+
+
+class TestKeyManagement:
+    def test_list_keys_blocked_without_admin_key(self):
+        """Regular tenant key must NOT access admin endpoints."""
+        r = client.get("/api/admin/keys")
+        assert r.status_code == 403
+
+    def test_list_keys_returns_ok_with_admin_key(self):
+        r = admin_client.get("/api/admin/keys")
+        assert r.status_code == 200
+        d = r.json()
+        assert "total" in d
+        assert "keys" in d
+        assert d["total"] >= 2  # dev-default + admin-default seeded on startup
+
+    def test_create_key_blocked_without_admin_key(self):
+        r = client.post("/api/admin/keys", json={"tenant_id": "hacker", "name": "bad"})
+        assert r.status_code == 403
+
+    def test_create_key_returns_raw_key(self):
+        r = admin_client.post("/api/admin/keys", json={
+            "tenant_id": "bank_test_001", "name": "integration-test-key"
+        })
+        assert r.status_code == 200
+        d = r.json()
+        assert "key" in d
+        assert "id" in d
+        assert d["tenant_id"] == "bank_test_001"
+        assert len(d["key"]) >= 32  # token_urlsafe(32) → 43 chars
+        assert "warning" in d
+
+    def test_created_key_is_functional(self):
+        """A freshly issued key must authenticate protected endpoints."""
+        create = admin_client.post("/api/admin/keys", json={
+            "tenant_id": "bank_functional", "name": "functional-test"
+        }).json()
+        new_key = create["key"]
+        r = TestClient(app, headers={"X-API-Key": new_key}).post(
+            "/api/risk/score", json={**METRICS_LOW, "framework": "gdpr"}
+        )
+        assert r.status_code == 200
+
+    def test_revoke_key_blocks_access(self):
+        """Revoked key must return 401."""
+        create = admin_client.post("/api/admin/keys", json={
+            "tenant_id": "bank_revoke", "name": "to-revoke"
+        }).json()
+        new_key = create["key"]
+        key_id  = create["id"]
+        # Confirm key works before revocation
+        r_before = TestClient(app, headers={"X-API-Key": new_key}).get("/api/audit")
+        assert r_before.status_code == 200
+        # Revoke
+        rev = admin_client.delete(f"/api/admin/keys/{key_id}")
+        assert rev.status_code == 200
+        assert rev.json()["revoked"] is True
+        # Key must now be rejected
+        r_after = TestClient(app, headers={"X-API-Key": new_key}).get("/api/audit")
+        assert r_after.status_code == 401
+
+    def test_prometheus_metrics_includes_key_count(self):
+        r = TestClient(app).get("/metrics")
+        assert r.status_code == 200
+        assert "genesis_api_keys_total" in r.text
