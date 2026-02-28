@@ -291,6 +291,7 @@ EOF</pre>
 
 <script>
 const API = 'http://localhost:8080';
+const GENESIS_KEY = window.__GENESIS_KEY__ || 'genesis-dev-key'; // override via server-rendered __GENESIS_KEY__ in prod
 const FRAMEWORKS = ['basel_iii','dora','gdpr','ai_act','mifid_ii','aml6','psd2','solvency_ii','eba'];
 const FW_LABELS = {
   basel_iii:'Basel III', dora:'DORA', gdpr:'GDPR', ai_act:'AI Act',
@@ -359,7 +360,7 @@ function liveRisk() {
           framework: 'dora'
         };
         const r = await (await fetch(`${API}/api/risk/score`, {
-          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+          method:'POST', headers:{'Content-Type':'application/json','X-API-Key':GENESIS_KEY}, body: JSON.stringify(body)
         })).json();
         this.score = r.risk_score?.toFixed(1) ?? '—';
         this.level = r.risk_level ?? '—';
@@ -389,8 +390,8 @@ function euMatrix() {
             network_io_mbps: this.metrics.network_io, disk_usage_pct: this.metrics.disk_usage,
             error_rate_pct: this.metrics.error_rate, framework: fw };
           const [rRes, cRes] = await Promise.all([
-            fetch(`${API}/api/risk/score`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(rBody) }).then(r=>r.json()),
-            fetch(`${API}/api/compliance/${fw}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...BASE_COMPLIANCE, framework:fw}) }).then(r=>r.json()).catch(()=>({}))
+            fetch(`${API}/api/risk/score`, { method:'POST', headers:{'Content-Type':'application/json','X-API-Key':GENESIS_KEY}, body:JSON.stringify(rBody) }).then(r=>r.json()),
+            fetch(`${API}/api/compliance/${fw}`, { method:'POST', headers:{'Content-Type':'application/json','X-API-Key':GENESIS_KEY}, body:JSON.stringify({...BASE_COMPLIANCE, framework:fw}) }).then(r=>r.json()).catch(()=>({}))
           ]);
           const fi = rRes.feature_importance ?? {};
           const driver = Object.entries(fi).sort((a,b)=>b[1]-a[1])[0]?.[0] ?? '—';
@@ -455,7 +456,7 @@ function singleRisk() {
           network_io_mbps: this.metrics.network_io, disk_usage_pct: this.metrics.disk_usage,
           error_rate_pct: this.metrics.error_rate, framework: this.framework };
         this.result = await (await fetch(`${API}/api/risk/score`, {
-          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+          method:'POST', headers:{'Content-Type':'application/json','X-API-Key':GENESIS_KEY}, body: JSON.stringify(body)
         })).json();
       } catch(e) { this.error = e.message; }
       this.loading = false;
@@ -472,7 +473,7 @@ function singleRisk() {
           regulatory_action: this.result.regulatory_action ?? '',
         };
         const r = await (await fetch(`${API}/api/ai/explain`, {
-          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+          method:'POST', headers:{'Content-Type':'application/json','X-API-Key':GENESIS_KEY}, body: JSON.stringify(body)
         })).json();
         if (r.detail) { this.aiError = r.detail; }
         else { this.aiExplain = r.explanation; }
@@ -502,7 +503,7 @@ function liveCompliance() {
         try {
           const body = { ...BASE_COMPLIANCE, framework: fw };
           const r = await (await fetch(`${API}/api/compliance/${fw}`, {
-            method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+            method:'POST', headers:{'Content-Type':'application/json','X-API-Key':GENESIS_KEY}, body: JSON.stringify(body)
           })).json();
           this.statuses[fw] = r.compliance_status ?? '—';
           this.scores[fw] = r.compliance_score_pct ?? 0;

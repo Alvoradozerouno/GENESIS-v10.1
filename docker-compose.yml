@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: genesis-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - genesis_data:/app/data
+    depends_on:
+      - llama
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  llama:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: genesis-llama
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./models:/models:ro
+    command: >
+      --model /models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+      --port 8090
+      --host 0.0.0.0
+      --ctx-size 2048
+      --n-predict 512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  genesis_data:
+    driver: local

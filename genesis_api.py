@@ -17,17 +17,20 @@ Docs:  http://localhost:8080/docs
 
 import json
 import hashlib
+import sqlite3
 import sys
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import urllib.request
 import urllib.error
 import psutil
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, model_validator, Field
 import uvicorn
 
@@ -72,6 +75,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─────────────────────────────────────────────────────────────
+# AUTHENTICATION — X-API-Key header or Bearer token
+# Set env var GENESIS_API_KEY to override the default dev key.
+# ─────────────────────────────────────────────────────────────
+_API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+_GENESIS_API_KEY = os.environ.get("GENESIS_API_KEY", "genesis-dev-key")
+
+
+async def require_api_key(
+    request: Request,
+    api_key: Optional[str] = Security(_API_KEY_HEADER),
+) -> str:
+    """Accepts X-API-Key header or Authorization: Bearer <key>."""
+    if api_key and api_key == _GENESIS_API_KEY:
+        return api_key
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and auth[7:] == _GENESIS_API_KEY:
+        return auth[7:]
+    raise HTTPException(status_code=401, detail="Missing or invalid API key. Add header: X-API-Key: <key>")
 
 # ─────────────────────────────────────────────────────────────
 # RISK ENGINE — Pure NumPy (sklearn not yet Py3.14 compatible)
@@ -354,19 +377,50 @@ FRAMEWORKS = {
 }
 
 # ─────────────────────────────────────────────────────────────
-# AUDIT LOG (in-memory for demo)
+# AUDIT PERSISTENCE — SQLite (stdlib, no extra deps)
+# Survives restarts; path override via GENESIS_DB_PATH env var.
 # ─────────────────────────────────────────────────────────────
-audit_log = []
+_DB_PATH = Path(
+    os.environ.get("GENESIS_DB_PATH",
+                   str(Path(__file__).parent / "data" / "audit.db"))
+)
 
-def log_audit(action: str, payload: dict):
-    entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "action": action,
-        "payload": payload,
-        "genesis_version": "10.1",
-    }
-    audit_log.append(entry)
-    return entry
+
+def _init_db() -> None:
+    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(_DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp        TEXT    NOT NULL,
+                action           TEXT    NOT NULL,
+                payload          TEXT    NOT NULL,
+                genesis_version  TEXT    NOT NULL DEFAULT '10.1'
+            )
+        """)
+        conn.commit()
+
+
+_init_db()
+
+
+def log_audit(action: str, payload: dict) -> dict:
+    ts = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(_DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO audit_log (timestamp, action, payload, genesis_version) VALUES (?,?,?,?)",
+            (ts, action, json.dumps(payload), "10.1"),
+        )
+        conn.commit()
+    return {"timestamp": ts, "action": action, "genesis_version": "10.1"}
+
+
+def _audit_count() -> int:
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            return conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    except Exception:
+        return 0
 
 # ─────────────────────────────────────────────────────────────
 # ROUTES
@@ -403,7 +457,7 @@ def health():
         "model_r2": _MODEL_R2,
         "model_cv_r2": _MODEL_R2,
         "frameworks_loaded": len(FRAMEWORKS),
-        "audit_entries": len(audit_log),
+        "audit_entries": _audit_count(),
         "local_ai_ready": ai_ready,
         "llama_model": os.path.basename(LLAMA_MODEL),
         "uptime_check": datetime.now(timezone.utc).isoformat(),
@@ -448,7 +502,7 @@ def ai_status():
     }
 
 
-@app.post("/api/ai/explain", tags=["Local AI (llama.cpp)"])
+@app.post("/api/ai/explain", tags=["Local AI (llama.cpp)"], dependencies=[Depends(require_api_key)])
 def ai_explain(req: LlamaExplainRequest):
     """
     Ask local Qwen2.5-0.5B to explain a risk assessment result.
@@ -489,7 +543,7 @@ def ai_explain(req: LlamaExplainRequest):
     }
 
 
-@app.post("/api/risk/score", tags=["Risk ML Engine"])
+@app.post("/api/risk/score", tags=["Risk ML Engine"], dependencies=[Depends(require_api_key)])
 def risk_score(data: RiskInput):
     """
     Predict infrastructure risk score using Basel III ML Engine.
@@ -531,7 +585,7 @@ def risk_score(data: RiskInput):
     return result
 
 
-@app.post("/api/compliance/{framework}", tags=["Compliance Engine"])
+@app.post("/api/compliance/{framework}", tags=["Compliance Engine"], dependencies=[Depends(require_api_key)])
 def compliance_check(framework: str, data: ComplianceCheck):
     """
     Run compliance check against specific EU regulatory framework.
@@ -674,7 +728,7 @@ def list_frameworks():
     }
 
 
-@app.post("/api/cert/sign", tags=["QES / eIDAS 2.0"])
+@app.post("/api/cert/sign", tags=["QES / eIDAS 2.0"], dependencies=[Depends(require_api_key)])
 def sign_document(req: SignRequest):
     """
     Simulate Qualified Electronic Signature (QES) document signing.
@@ -708,13 +762,28 @@ def sign_document(req: SignRequest):
     return result
 
 
-@app.get("/api/audit", tags=["Audit Trail"])
+@app.get("/api/audit", tags=["Audit Trail"], dependencies=[Depends(require_api_key)])
 def get_audit_log(limit: int = 50):
-    """Retrieve audit trail entries. All actions are logged immutably."""
+    """Retrieve audit trail entries from SQLite. All actions are logged immutably."""
+    with sqlite3.connect(_DB_PATH) as conn:
+        total = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+        rows = conn.execute(
+            "SELECT timestamp, action, payload, genesis_version FROM audit_log ORDER BY id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    entries = [
+        {
+            "timestamp": r[0],
+            "action": r[1],
+            "payload": json.loads(r[2]),
+            "genesis_version": r[3],
+        }
+        for r in rows
+    ]
     return {
-        "total_entries": len(audit_log),
-        "showing": min(limit, len(audit_log)),
-        "entries": audit_log[-limit:],
+        "total_entries": total,
+        "showing": len(entries),
+        "entries": entries,
     }
 
 
