@@ -125,6 +125,8 @@ _log.propagate = False
 _API_KEY_HEADER   = APIKeyHeader(name="X-API-Key", auto_error=False)
 _GENESIS_API_KEY  = os.environ.get("GENESIS_API_KEY",  "genesis-dev-key")
 _GENESIS_ADMIN_KEY = os.environ.get("GENESIS_ADMIN_KEY", "genesis-admin-key")
+# Module-level signing key — read once at startup; stable for entire process lifetime.
+_GENESIS_SIGNING_KEY: bytes = os.environ.get("GENESIS_SIGNING_KEY", secrets.token_hex(32)).encode()
 
 
 def _hash_key(raw: str) -> str:
@@ -921,11 +923,10 @@ def sign_document(req: SignRequest):
     # Cryptographic document hashing (SHA-256)
     doc_hash = req.document_hash or hashlib.sha256(req.document_name.encode("utf-8")).hexdigest()
 
-    # HMAC-SHA256 signing: key = GENESIS_SIGNING_KEY env var (falls back to per-process secret)
-    _signing_key = os.environ.get("GENESIS_SIGNING_KEY", secrets.token_hex(32)).encode()
+    # HMAC-SHA256 signing — uses module-level _GENESIS_SIGNING_KEY (stable for process lifetime)
     ts_bytes = datetime.now(timezone.utc).isoformat().encode()
     signature = hmac.new(
-        _signing_key,
+        _GENESIS_SIGNING_KEY,
         msg=(doc_hash + req.signer).encode("utf-8") + ts_bytes,
         digestmod=hashlib.sha256,
     ).hexdigest()

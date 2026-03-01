@@ -37,6 +37,10 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# mypy / type-checking caches
+.mypy_cache/
+mypy_cache/
+
 # GENESIS-specific
 genesis-deploy/
 evidence/*/
