@@ -13,7 +13,7 @@
   <a href="https://github.com/Alvoradozerouno/GENESIS-v10.1/actions/workflows/ci.yml">
     <img src="https://github.com/Alvoradozerouno/GENESIS-v10.1/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
-  <img src="https://img.shields.io/badge/tests-87%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-94%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/auth-API%20Key%20%2B%20Bearer-orange" alt="Auth">
   <br>
@@ -39,8 +39,8 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#features">Features</a> •
   <a href="#compliance">9 Frameworks</a> •
-  <a href="MARKET_VALUATION_2026.md">€280M+ Valuation</a> •
-  <a href="MARKETING_STRATEGY.md">Marketing</a> •
+  <a href="docs/market-valuation.md">€280M+ Valuation</a> •
+  <a href="docs/marketing/strategy.md">Marketing</a> •
   <a href="#contributing">Contributing</a>
 </p>
 
@@ -69,7 +69,7 @@ GENESIS is not a library, not a framework, not a SaaS product. It is an **autono
 | **HTTPS / TLS** | ✅ | nginx TLS 1.2+1.3, HSTS, CSP, `X-Frame-Options` — see `nginx/genesis.conf` |
 | **CI/CD** | ✅ | GitHub Actions matrix Python 3.12 + 3.13 — test → lint → docker on every push |
 | **Docker / Compose** | ✅ | `python:3.12-slim` image, nginx (public) → api → llama-server (GPU) stack |
-| **Test Suite** | ✅ | **87 tests**, 10 classes — Auth, RateLimit, InputValidation, Compliance, Audit, QES |
+| **Test Suite** | ✅ | **94 tests**, 10 classes — Auth, RateLimit, InputValidation, Compliance, Audit, QES |
 | **Local AI (llama.cpp)** | ✅ | Qwen2.5-0.5B-Instruct Q4_K_M — `/api/ai/explain` requires auth |
 | **Risk ML Engine** | ✅ | Pure NumPy, R²=0.8955 — 9 EU framework profiles, 5-dimensional input |
 
